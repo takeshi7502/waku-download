@@ -3,7 +3,7 @@ const $ = id => document.getElementById(id);
 const parentOrigin = (() => {
   try {
     const url = new URL(decodeURIComponent(location.hash.slice(1)));
-    return url.protocol === "https:" && (/^(www\.)?(x|twitter)\.com$/.test(url.hostname) || XDLFB.isFacebook(url.href)) ? url.origin : "";
+    return url.protocol === "https:" && (/^(www\.)?(x|twitter)\.com$/.test(url.hostname) || WakuFacebook.isFacebook(url.href)) ? url.origin : "";
   } catch { return ""; }
 })();
 let state = { items: [], selected: [], handle: null };
@@ -15,7 +15,7 @@ let scrollTimer, errorTimer;
 const rows = new Map();
 const busy = new Set();
 const command = (name, data = {}) => {
-  if (parentOrigin) parent.postMessage({ type: "XDL_PANEL_COMMAND", command: name, ...data }, parentOrigin);
+  if (parentOrigin) parent.postMessage({ type: "WAKU_PANEL_COMMAND", command: name, ...data }, parentOrigin);
 };
 async function chromeCall(action) {
   try {
@@ -229,11 +229,11 @@ async function startDownload(items) {
   finally { busy.delete("download"); updateProgress(); }
 }
 window.addEventListener("message", event => {
-  if (event.source !== parent || event.origin !== parentOrigin || event.data?.type !== "XDL_PANEL_STATE") return;
+  if (event.source !== parent || event.origin !== parentOrigin || event.data?.type !== "WAKU_PANEL_STATE") return;
   const raw = event.data.state;
   const facebook = raw?.platform === "facebook";
-  const handle = facebook ? XDLFB.handle(raw?.handle) : XDL.profile(raw?.handle);
-  const items = (Array.isArray(raw?.items) ? raw.items : []).slice(0, XDL.LIMIT).map(item => facebook ? XDLFB.normalize(item, handle) : XDL.normalize(item, handle)).filter(Boolean);
+  const handle = facebook ? WakuFacebook.handle(raw?.handle) : WakuX.profile(raw?.handle);
+  const items = (Array.isArray(raw?.items) ? raw.items : []).slice(0, WakuX.LIMIT).map(item => facebook ? WakuFacebook.normalize(item, handle) : WakuX.normalize(item, handle)).filter(Boolean);
   const validIds = new Set(items.map(item => item.id));
   state = { ...raw, handle, items, selected: (Array.isArray(raw?.selected) ? raw.selected : []).filter(id => validIds.has(id)) };
   render();
@@ -265,4 +265,4 @@ void (async () => {
     updateProgress();
   } catch (error) { showError(error); }
 })();
-if (parentOrigin) parent.postMessage({ type: "XDL_PANEL_READY" }, parentOrigin);
+if (parentOrigin) parent.postMessage({ type: "WAKU_PANEL_READY" }, parentOrigin);

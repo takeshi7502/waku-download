@@ -64,5 +64,5 @@
     if (!clean) throw new Error("Ảnh không hợp lệ.");
     return `${legacy ? "XDownload" : "WakuDownload/X"}/${clean.handle}/${clean.tweetId}_${clean.id}.${clean.format}`;
   }
-  root.XDL = Object.freeze({ profile, photo, normalize, extract, filename, LIMIT });
+  root.WakuX = Object.freeze({ profile, photo, normalize, extract, filename, LIMIT });
 })(globalThis);

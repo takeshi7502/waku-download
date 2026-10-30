@@ -4,9 +4,9 @@ import vm from "node:vm";
 import { readFile } from "node:fs/promises";
 import { randomUUID } from "node:crypto";
 
-const core = await readFile(new URL("../extension/core.js", import.meta.url), "utf8");
-const facebook = await readFile(new URL("../extension/facebook.js", import.meta.url), "utf8");
-const workerCode = await readFile(new URL("../extension/background.js", import.meta.url), "utf8");
+const core = await readFile(new URL("../extension/src/platforms/x.js", import.meta.url), "utf8");
+const facebook = await readFile(new URL("../extension/src/platforms/facebook.js", import.meta.url), "utf8");
+const workerCode = await readFile(new URL("../extension/src/background.js", import.meta.url), "utf8");
 const image = id => ({ url: `https://pbs.twimg.com/media/${id}.jpg`, handle: "example", tweetId: "123", source: "api" });
 async function harness(saved = {}, options = {}) {
   const store = structuredClone(saved);
@@ -36,7 +36,7 @@ async function harness(saved = {}, options = {}) {
         Object.assign(session, snapshot);
       }, remove: async keys => { for (const key of keys) delete session[key]; } }
     },
-    alarms: { create: async () => {}, onAlarm: { addListener: listener => { onAlarm = listener; } } },
+    alarms: { create: async () => {}, clear: async () => {}, onAlarm: { addListener: listener => { onAlarm = listener; } } },
     downloads: {
       download: async settings => {
         calls.push(settings);
@@ -51,7 +51,7 @@ async function harness(saved = {}, options = {}) {
       onChanged: { addListener: listener => { onChanged = listener; } }
     }
   };
-  context = vm.createContext({ chrome, URL, crypto: { randomUUID }, console, importScripts: (...files) => { for (const file of files) vm.runInContext(file === "facebook.js" ? facebook : core, context); } });
+  context = vm.createContext({ chrome, URL, crypto: { randomUUID }, console, importScripts: (...files) => { for (const file of files) vm.runInContext(file.endsWith("facebook.js") ? facebook : core, context); } });
   vm.runInContext(options.workerCode || workerCode, context);
   const sendFrom = (message, sender) => new Promise(resolve => {
     let replied = false;
@@ -61,7 +61,7 @@ async function harness(saved = {}, options = {}) {
   const send = message => sendFrom(message, { url: "chrome-extension://test/panel.html", tab: { id: 1 } });
   const flush = () => send({ type: "JOB" });
   await flush();
-  return { store, session, calls, writes, operations, downloads, send, sendFrom, flush, alarm: async () => { onAlarm({ name: "xdl-queue" }); return flush(); }, complete: async (downloadId, state = "complete") => {
+  return { store, session, calls, writes, operations, downloads, send, sendFrom, flush, alarm: async () => { onAlarm({ name: "waku-queue" }); return flush(); }, complete: async (downloadId, state = "complete") => {
     downloads.get(downloadId).state = state;
     onChanged({ id: downloadId, state: { current: state }, ...(state === "interrupted" ? { error: { current: "NETWORK_FAILED" } } : {}) });
     return flush();
@@ -183,7 +183,7 @@ test("resuming an older saved job keeps its original folder", async () => {
   assert.equal(restored.calls.length, 1);
   assert.equal(restored.calls[0].filename, "XDownload/example/123_d.jpg");
 });
-test("resuming a 1.2.1 job retains its counted folder and history", async () => {
+test("resuming a legacy job retains its counted folder and history", async () => {
   const h = await harness();
   await h.send({ type: "DOWNLOAD", handle: "example", items: ["a", "b", "c", "d"].map(image) });
   delete h.store.job.pathVersion;

@@ -1,8 +1,8 @@
 (() => {
   "use strict";
-  const CONTENT_VERSION = "1.3.0";
-  const isFacebook = XDLFB.isFacebook(location.href);
-  const normalize = isFacebook ? XDLFB.normalize : XDL.normalize;
+  const CONTENT_VERSION = "1.0.0";
+  const isFacebook = WakuFacebook.isFacebook(location.href);
+  const normalize = isFacebook ? WakuFacebook.normalize : WakuX.normalize;
   const seenFacebookScripts = new WeakSet();
   const collections = new Map();
   let extensionBase;
@@ -65,11 +65,11 @@
   }
 
   function currentHandle() {
-    if (isFacebook) return XDLFB.profile(location.href);
-    const direct = XDL.profile(location.href);
+    if (isFacebook) return WakuFacebook.profile(location.href);
+    const direct = WakuX.profile(location.href);
     if (direct) return direct;
     const match = location.pathname.match(/^\/([\w]{1,15})\/(?:status\/\d+|with_replies|highlights|articles)(?:\/|$)/);
-    return match ? XDL.profile(match[1]) : null;
+    return match ? WakuX.profile(match[1]) : null;
   }
   function savedState(collection) {
     return { platform: isFacebook ? "facebook" : "x", handle: collection.handle, items: [...collection.images.values()], selected: [...collection.selected], selectNew: collection.selectNew, scrollTop: collection.scrollTop, name: collection.name, avatar: collection.avatar };
@@ -86,11 +86,11 @@
     clearTimeout(publishTimer);
     publishTimer = setTimeout(() => {
       if (!contextReady() || !panelReady || !frame) return;
-      frame.contentWindow.postMessage({ type: "XDL_PANEL_STATE", state: snapshot() }, extensionOrigin);
+      frame.contentWindow.postMessage({ type: "WAKU_PANEL_STATE", state: snapshot() }, extensionOrigin);
     }, 40);
   }
   function snapshot() {
-    return { platform: isFacebook ? "facebook" : "x", ...(active ? savedState(active) : { handle: null, items: [], selected: [], selectNew: true, scrollTop: 0 }), restoring: active?.restoring || false, onProfile: !!currentHandle(), onPhotos: !isFacebook || XDLFB.isPhotos(location.href), limit: XDL.LIMIT };
+    return { platform: isFacebook ? "facebook" : "x", ...(active ? savedState(active) : { handle: null, items: [], selected: [], selectNew: true, scrollTop: 0 }), restoring: active?.restoring || false, onProfile: !!currentHandle(), onPhotos: !isFacebook || WakuFacebook.isPhotos(location.href), limit: WakuX.LIMIT };
   }
   function syncProfile() {
     const handle = currentHandle();
@@ -111,7 +111,7 @@
           const item = normalize(raw, handle);
           if (!item) continue;
           restoredIds.add(item.id);
-          if (!collection.images.has(item.id) && collection.images.size < XDL.LIMIT) collection.images.set(item.id, item);
+          if (!collection.images.has(item.id) && collection.images.size < WakuX.LIMIT) collection.images.set(item.id, item);
         }
         if (!collection.selectionRevision) {
           collection.selectNew = saved.selectNew !== false;
@@ -127,13 +127,13 @@
       persist(collection);
       if (active === collection) publish();
     });
-    if (isFacebook) window.postMessage({ type: "XDL_READ_CACHE" }, location.origin);
+    if (isFacebook) window.postMessage({ type: "WAKU_READ_CACHE" }, location.origin);
   }
   function ingest(items) {
     syncProfile();
     if (!active || !currentHandle() || !Array.isArray(items)) return;
     let changed = false;
-    for (const raw of items.slice(0, XDL.LIMIT)) {
+    for (const raw of items.slice(0, WakuX.LIMIT)) {
       let item = normalize(raw, active.handle);
       if (!item) continue;
       if (isFacebook && item.source === "dom") {
@@ -142,7 +142,7 @@
       }
       const previous = active.images.get(item.id);
       if (!previous) {
-        if (active.images.size >= XDL.LIMIT) break;
+        if (active.images.size >= WakuX.LIMIT) break;
         active.images.set(item.id, item);
         if (active.selectNew) active.selected.add(item.id);
         changed = true;
@@ -157,11 +157,11 @@
     if (changed) { persist(active); publish(); }
   }
   function cacheFacebook(data) {
-    if (!active || !XDLFB.isPhotos(location.href)) return;
-    const candidates = XDLFB.extract(data, active.handle);
+    if (!active || !WakuFacebook.isPhotos(location.href)) return;
+    const candidates = WakuFacebook.extract(data, active.handle);
     for (const item of candidates) {
       const previous = active.candidates.get(item.id);
-      if (!previous && active.candidates.size >= XDL.LIMIT) active.candidates.delete(active.candidates.keys().next().value);
+      if (!previous && active.candidates.size >= WakuX.LIMIT) active.candidates.delete(active.candidates.keys().next().value);
       if (!previous || item.width * item.height >= previous.width * previous.height) active.candidates.set(item.id, item);
     }
     ingest(candidates.filter(item => active.images.has(item.id)));
@@ -191,7 +191,7 @@
     syncProfile();
     if (!active || !currentHandle()) return;
     if (isFacebook) {
-      if (!XDLFB.isPhotos(location.href)) return;
+      if (!WakuFacebook.isPhotos(location.href)) return;
       const primary = document.querySelector('[role="main"]') || document.querySelector("main");
       if (!primary) return;
       readFacebookScripts();
@@ -199,7 +199,7 @@
       if (name && active.name !== name) { active.name = name.slice(0, 80); persist(active); publish(); }
       const items = [];
       for (const link of primary.querySelectorAll('a[href*="photo"]')) {
-        const id = XDLFB.photoId(link.href);
+        const id = WakuFacebook.photoId(link.href);
         if (!id || link.querySelector('video, [aria-label*="video" i]')) continue;
         for (const image of link.querySelectorAll("img")) {
           const candidates = [{ url: image.currentSrc || image.src, width: image.naturalWidth || 0 }];
@@ -208,7 +208,7 @@
             if (match) candidates.push({ url: match[1], width: Number(match[2]) });
           }
           candidates.sort((a, b) => b.width - a.width);
-          const best = candidates.find(candidate => XDLFB.photo(candidate.url));
+          const best = candidates.find(candidate => WakuFacebook.photo(candidate.url));
           if (best) items.push({ id, handle: active.handle, url: best.url, width: best.width, height: image.naturalHeight || 0, text: image.alt || "", source: "dom" });
         }
       }
@@ -251,8 +251,8 @@
   function mount() {
     if (!contextReady() || !enabled || !document.documentElement || host?.isConnected) return;
     host = document.createElement("div");
-    host.id = "xdownload-panel";
-    host.dataset.xdownloadVersion = CONTENT_VERSION;
+    host.id = "waku-panel";
+    host.dataset.wakuVersion = CONTENT_VERSION;
     const root = host.attachShadow({ mode: "open" });
     const style = document.createElement("style");
     style.textContent = `:host{all:initial!important;position:fixed!important;right:12px!important;top:16px!important;bottom:16px!important;width:min(380px,calc(100vw - 24px))!important;z-index:2147483646!important;display:block!important;color-scheme:dark!important}:host(.collapsed){top:16px!important;bottom:auto!important;width:48px!important;height:48px!important}iframe{border:0!important;width:100%!important;height:100%!important;display:block;border-radius:12px;box-shadow:0 8px 38px #0004;background:#111318}button{all:initial;box-sizing:border-box;display:grid;place-items:center;width:48px;height:48px;border:1px solid #aab2ff;border-radius:15px;background:linear-gradient(135deg,#5264ff,#8565ff);box-shadow:0 4px 20px #0004;color:white;cursor:pointer;font:700 17px system-ui}button:hover{filter:brightness(1.1)}button:focus-visible{outline:3px solid #a5afff;outline-offset:3px}[hidden]{display:none!important}`;
@@ -260,7 +260,7 @@
     frame.title = "Waku Download — bảng tải ảnh";
     frame.src = `${extensionBase}panel.html#${encodeURIComponent(location.origin)}`;
     launcher = document.createElement("button");
-    launcher.id = "xdownload-launcher";
+    launcher.id = "waku-launcher";
     launcher.textContent = "↓";
     launcher.title = `Mở lại Waku Download ${CONTENT_VERSION}`;
     launcher.setAttribute("aria-label", "Mở lại bảng tải ảnh");
@@ -281,7 +281,7 @@
     }
     active.selectionRevision++;
     if (message.command === "SELECT") {
-      for (const id of (message.ids || []).slice(0, XDL.LIMIT)) {
+      for (const id of (message.ids || []).slice(0, WakuX.LIMIT)) {
         if (!active.images.has(id)) continue;
         if (message.selected) active.selected.add(id); else active.selected.delete(id);
       }
@@ -295,18 +295,18 @@
   }
   window.addEventListener("message", event => {
     if (!contextReady()) return;
-    if (event.source === window && event.origin === location.origin && event.data?.type === "XDL_DATA") {
+    if (event.source === window && event.origin === location.origin && event.data?.type === "WAKU_DATA") {
       if (isFacebook) {
         syncProfile();
-        if (!active || !XDLFB.isPhotos(location.href)) return;
+        if (!active || !WakuFacebook.isPhotos(location.href)) return;
         cacheFacebook(event.data.data);
         scheduleRead();
-      } else ingest(XDL.extract(event.data.data));
+      } else ingest(WakuX.extract(event.data.data));
       return;
     }
     if (!frame || event.source !== frame.contentWindow || event.origin !== extensionOrigin) return;
-    if (event.data?.type === "XDL_PANEL_READY") { panelReady = true; publish(); }
-    if (event.data?.type === "XDL_PANEL_COMMAND") command(event.data);
+    if (event.data?.type === "WAKU_PANEL_READY") { panelReady = true; publish(); }
+    if (event.data?.type === "WAKU_PANEL_COMMAND") command(event.data);
   }, { signal: lifecycle.signal });
   if (!registerChromeListener(() => chrome.runtime.onMessage, (message, _sender, reply) => {
     if (!contextReady()) return;
@@ -343,6 +343,6 @@
     enabled ||= !!result?.enabled;
     collapsed = !!result?.collapsed;
     mount();
-    window.postMessage({ type: "XDL_READ_CACHE" }, location.origin);
+    window.postMessage({ type: "WAKU_READ_CACHE" }, location.origin);
   }).catch(() => {});
 })();

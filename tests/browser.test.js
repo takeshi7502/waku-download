@@ -7,10 +7,11 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 const root = fileURLToPath(new URL("..", import.meta.url));
-const extension = path.join(root, "extension");
+const extension = process.env.WAKU_EXTENSION_DIR || path.join(root, "extension");
 const artifacts = path.join(root, "artifacts");
 async function browserPath() {
-  if (process.env.XDL_CHROMIUM) return process.env.XDL_CHROMIUM;
+  if (process.env.WAKU_CHROMIUM) return process.env.WAKU_CHROMIUM;
+  try { await access(chromium.executablePath()); return chromium.executablePath(); } catch {}
   const cache = process.env.LOCALAPPDATA && path.join(process.env.LOCALAPPDATA, "ms-playwright");
   if (cache) {
     const directories = (await readdir(cache).catch(() => [])).filter(name => /^chromium-\d+$/.test(name)).sort().reverse();
@@ -54,7 +55,7 @@ async function waitFor(read, predicate, message) {
 }
 
 test("docked panel: passive capture, collapse, tab switching, persisted selection and fixed download progress", { timeout: 90000 }, async () => {
-  const userData = await mkdtemp(path.join(tmpdir(), "xdl-test-"));
+  const userData = await mkdtemp(path.join(tmpdir(), "waku-test-"));
   let context;
   const errors = [];
   try {
@@ -103,9 +104,9 @@ test("docked panel: passive capture, collapse, tab switching, persisted selectio
     assert.equal(await page.evaluate(() => scrollY), 0, "extension must not scroll the page automatically");
     await worker.evaluate(() => chrome.storage.local.set({ panelEnabled: true }));
     await send({ type: "OPEN_PANEL" });
-    let panel = page.frameLocator("#xdownload-panel iframe");
+    let panel = page.frameLocator("#waku-panel iframe");
     await panel.locator("#image-count").filter({ hasText: "5 ảnh" }).waitFor();
-    assert.equal(await page.locator("#xdownload-panel").getAttribute("data-xdownload-version"), "1.3.0");
+    assert.equal(await page.locator("#waku-panel").getAttribute("data-waku-version"), "1.0.0");
     assert.equal(await panel.locator(".photo").count(), 5);
     await panel.getByLabel("Chọn ảnh second", { exact: true }).uncheck();
     await waitFor(status, value => value.selected.length === 4, "selection should update in the content state");
@@ -114,13 +115,13 @@ test("docked panel: passive capture, collapse, tab switching, persisted selectio
 
     const firstImage = await panel.locator(".photo img").first().elementHandle();
     await panel.locator("#collapse").click();
-    await page.locator("#xdownload-launcher").waitFor({ state: "visible" });
-    const launcherBox = await page.locator("#xdownload-launcher").boundingBox();
+    await page.locator("#waku-launcher").waitFor({ state: "visible" });
+    const launcherBox = await page.locator("#waku-launcher").boundingBox();
     assert.equal(launcherBox.y, 16, "collapsed launcher must be at the top of the viewport");
     assert.equal(launcherBox.x + launcherBox.width, 1440 - 12, "collapsed launcher must stay at the right edge");
     await page.evaluate(() => scrollTo(0, 800));
     await waitFor(status, value => value.items.length === 7, "manual scrolling should capture all newly loaded photos while collapsed");
-    await page.locator("#xdownload-launcher").click();
+    await page.locator("#waku-launcher").click();
     await panel.locator("#image-count").filter({ hasText: "7 ảnh" }).waitFor();
     assert.equal(await firstImage.evaluate(element => element.isConnected), true, "previews must not be recreated after collapse or new media");
     await page.evaluate(() => window.loadXHR());
@@ -162,7 +163,7 @@ test("docked panel: passive capture, collapse, tab switching, persisted selectio
     assert.ok(footerAfter.y + footerAfter.height <= 900);
     const other = await context.newPage();
     await other.goto("https://x.com/other/media");
-    const otherPanel = other.frameLocator("#xdownload-panel iframe");
+    const otherPanel = other.frameLocator("#waku-panel iframe");
     await otherPanel.locator("#job-title").filter({ hasText: "Đang tải" }).waitFor();
     await page.bringToFront();
     assert.equal(await panel.locator("#job-count").textContent(), "0/33");
@@ -170,7 +171,7 @@ test("docked panel: passive capture, collapse, tab switching, persisted selectio
     assert.equal(await firstImage.evaluate(element => element.isConnected), true, "tab switching must preserve existing previews");
     await page.waitForTimeout(500);
     await page.reload();
-    panel = page.frameLocator("#xdownload-panel iframe");
+    panel = page.frameLocator("#waku-panel iframe");
     await panel.locator("#image-count").filter({ hasText: "34 ảnh" }).waitFor();
     await panel.locator("#job-title").filter({ hasText: "Đang tải" }).waitFor();
     assert.equal(await panel.getByLabel("Chọn ảnh second", { exact: true }).isChecked(), false, "reload should restore deselected images");
@@ -186,17 +187,17 @@ test("docked panel: passive capture, collapse, tab switching, persisted selectio
     await panel.locator("#job-title").filter({ hasText: "Đã dừng tải" }).waitFor();
     await panel.locator("#list").evaluate(element => { element.scrollTop = 0; });
     await mkdir(artifacts, { recursive: true });
-    await page.locator("#xdownload-panel").screenshot({ path: path.join(artifacts, "panel.png") });
+    await page.locator("#waku-panel").screenshot({ path: path.join(artifacts, "panel.png") });
     await page.setViewportSize({ width: 1280, height: 450 });
     const compact = await panel.locator("footer").boundingBox();
     assert.ok(compact.y >= 16 && compact.y + compact.height <= 435, "footer must remain visible in a short browser window");
     await panel.locator("#collapse").click();
-    await page.locator("#xdownload-launcher").waitFor({ state: "visible" });
+    await page.locator("#waku-launcher").waitFor({ state: "visible" });
     await page.waitForTimeout(350);
     await page.reload();
-    await page.locator("#xdownload-launcher").waitFor({ state: "visible" });
+    await page.locator("#waku-launcher").waitFor({ state: "visible" });
     assert.equal((await status()).items.length, 34, "collapsed panel should continue to preserve its collection");
-    assert.equal((await page.locator("#xdownload-launcher").boundingBox()).y, 16, "restored launcher must also remain in the upper corner");
+    assert.equal((await page.locator("#waku-launcher").boundingBox()).y, 16, "restored launcher must also remain in the upper corner");
 
     // Reproduce the reported failure: reload the actual extension while its old
     // content script stays alive on an existing X tab, then trigger more activity.
@@ -209,21 +210,21 @@ test("docked panel: passive capture, collapse, tab switching, persisted selectio
       document.querySelector("main").append(document.createElement("div"));
       window.loadXHR();
     });
-    await waitFor(() => page.locator("#xdownload-launcher").getAttribute("title"), title => title?.includes("đã cập nhật"), "old content script should retire cleanly when the extension is reloaded");
-    assert.equal(await page.locator("#xdownload-panel iframe").count(), 0, "retired extension frame must be removed");
+    await waitFor(() => page.locator("#waku-launcher").getAttribute("title"), title => title?.includes("đã cập nhật"), "old content script should retire cleanly when the extension is reloaded");
+    assert.equal(await page.locator("#waku-panel iframe").count(), 0, "retired extension frame must be removed");
     await page.waitForTimeout(1100);
     const afterReload = await chromeErrors();
     assert.deepEqual(afterReload.errors, [], "Chrome's own extension error log must be empty after reload");
     assert.deepEqual(afterReload.events, [], "Chrome must not report new extension errors while retiring old scripts");
-    await Promise.all([page.waitForEvent("load"), page.locator("#xdownload-launcher").click()]);
+    await Promise.all([page.waitForEvent("load"), page.locator("#waku-launcher").click()]);
     // runtime.reload unloads the command-line test extension. The recovery
     // button must still reload the page without using any extension API.
     assert.equal(page.url(), "https://x.com/example/media");
-    assert.equal(await page.locator("#xdownload-launcher").filter({ hasText: "↻" }).count(), 0);
+    assert.equal(await page.locator("#waku-launcher").filter({ hasText: "↻" }).count(), 0);
     assert.deepEqual(errors, []);
   } finally {
     await context?.close();
     const expected = path.resolve(tmpdir()) + path.sep;
-    if (path.resolve(userData).startsWith(expected) && path.basename(userData).startsWith("xdl-test-")) await rm(userData, { recursive: true, force: true });
+    if (path.resolve(userData).startsWith(expected) && path.basename(userData).startsWith("waku-test-")) await rm(userData, { recursive: true, force: true });
   }
 });

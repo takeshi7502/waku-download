@@ -3,9 +3,9 @@ import assert from "node:assert/strict";
 import vm from "node:vm";
 import { readFile } from "node:fs/promises";
 
-const core = await readFile(new URL("../extension/core.js", import.meta.url), "utf8");
-const facebook = await readFile(new URL("../extension/facebook.js", import.meta.url), "utf8");
-const content = await readFile(new URL("../extension/content.js", import.meta.url), "utf8");
+const core = await readFile(new URL("../extension/src/platforms/x.js", import.meta.url), "utf8");
+const facebook = await readFile(new URL("../extension/src/platforms/facebook.js", import.meta.url), "utf8");
+const content = await readFile(new URL("../extension/src/content.js", import.meta.url), "utf8");
 const flush = () => new Promise(resolve => setImmediate(resolve));
 
 test("handles invalidation during startup, message delivery and runtime checks", async t => {

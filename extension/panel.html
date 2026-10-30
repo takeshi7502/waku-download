@@ -4,13 +4,13 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Waku Download</title>
-  <link rel="stylesheet" href="panel.css">
-  <script src="core.js" defer></script>
-  <script src="facebook.js" defer></script>
-  <script src="panel.js" defer></script>
+  <link rel="stylesheet" href="src/ui/panel.css">
+  <script src="src/platforms/x.js" defer></script>
+  <script src="src/platforms/facebook.js" defer></script>
+  <script src="src/ui/panel.js" defer></script>
 </head>
 <body>
-  <header><div class="brand"><span class="logo">W↓</span><h1>Waku Download</h1><span class="version">1.3.0</span></div><button id="collapse" class="header-button" title="Thu gọn thành nút nhỏ" aria-label="Thu gọn">»</button></header>
+  <header><div class="brand"><span class="logo">W↓</span><h1>Waku Download</h1><span class="version">1.0.0</span></div><button id="collapse" class="header-button" title="Thu gọn thành nút nhỏ" aria-label="Thu gọn">»</button></header>
   <section class="profile card"><div class="avatar"><span id="avatar-fallback">@</span><img id="avatar" alt="" hidden></div><div class="profile-copy"><strong id="profile-name">Mở một profile X</strong><span id="profile-handle">Tab Ảnh / Media</span></div><span class="live"><i></i> Tự nhận</span></section>
   <section class="options card"><div class="scope"><span>Phạm vi</span><strong>Ảnh đã load trên profile</strong></div><div class="checks"><label><input id="skip-saved" type="checkbox" checked> Bỏ qua ảnh đã tải</label><label><input id="select-new" type="checkbox" checked> Chọn ảnh mới</label></div></section>
   <section class="collection card">

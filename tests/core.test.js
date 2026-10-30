@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import "../extension/core.js";
-const { profile, photo, extract, normalize, filename } = globalThis.XDL;
+import "../extension/src/platforms/x.js";
+const { profile, photo, extract, normalize, filename } = globalThis.WakuX;
 
 test("validates profile names and limits navigation to actual profiles", () => {
   assert.equal(profile(" @_Pi_cos "), "_Pi_cos");

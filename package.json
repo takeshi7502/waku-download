@@ -1,12 +1,13 @@
 {
   "name": "waku-download",
-  "version": "1.3.0",
+  "version": "1.0.0",
   "private": true,
   "type": "module",
-  "description": "Local Chrome/Edge extension for bulk downloading profile photos from X",
+  "engines": { "node": ">=22" },
+  "description": "Chrome and Edge extension for downloading loaded profile photos from X and Facebook",
   "scripts": {
     "test": "node --test tests/core.test.js tests/facebook.test.js tests/queue.test.js tests/content-lifecycle.test.js",
-    "test:browser": "node --test tests/browser.test.js tests/facebook-browser.test.js",
+    "test:browser": "node --test tests/browser.test.js tests/facebook-browser.test.js tests/version-reset-browser.test.js",
     "pack": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/pack.ps1"
   },
   "devDependencies": { "playwright": "1.64.1" }

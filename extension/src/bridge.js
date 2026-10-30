@@ -1,8 +1,8 @@
 /* Passive listener: reads responses X already requested; never sends API requests. */
 (() => {
   "use strict";
-  if (window.__xdlBridge) return;
-  window.__xdlBridge = true;
+  if (window.__wakuBridge) return;
+  window.__wakuBridge = true;
   // A small replay buffer covers listener startup without retaining the timeline twice.
   const cache = [];
   const apiUrl = value => {
@@ -16,7 +16,7 @@
   function consume(data) {
     cache.push(data);
     if (cache.length > 3) cache.shift();
-    window.postMessage({ type: "XDL_DATA", data }, location.origin);
+    window.postMessage({ type: "WAKU_DATA", data }, location.origin);
   }
   function consumeText(text) {
     // Facebook may send multiple newline-delimited GraphQL results or a CSRF prefix.
@@ -49,8 +49,8 @@
     return Reflect.apply(open, this, args);
   };
   window.addEventListener("message", event => {
-    if (event.source === window && event.origin === location.origin && event.data?.type === "XDL_READ_CACHE") {
-      for (const data of cache) window.postMessage({ type: "XDL_DATA", data }, location.origin);
+    if (event.source === window && event.origin === location.origin && event.data?.type === "WAKU_READ_CACHE") {
+      for (const data of cache) window.postMessage({ type: "WAKU_DATA", data }, location.origin);
     }
   });
 })();

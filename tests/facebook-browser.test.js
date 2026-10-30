@@ -6,9 +6,10 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-const extension = fileURLToPath(new URL("../extension", import.meta.url));
+const extension = process.env.WAKU_EXTENSION_DIR || fileURLToPath(new URL("../extension", import.meta.url));
 async function browserPath() {
-  if (process.env.XDL_CHROMIUM) return process.env.XDL_CHROMIUM;
+  if (process.env.WAKU_CHROMIUM) return process.env.WAKU_CHROMIUM;
+  try { await access(chromium.executablePath()); return chromium.executablePath(); } catch {}
   const cache = process.env.LOCALAPPDATA && path.join(process.env.LOCALAPPDATA, "ms-playwright");
   if (cache) for (const directory of (await readdir(cache).catch(() => [])).filter(name => /^chromium-\d+$/.test(name)).sort().reverse()) {
     const executable = path.join(cache, directory, "chrome-win64", "chrome.exe");
@@ -36,7 +37,7 @@ async function waitFor(read, predicate, message) {
 }
 
 test("Facebook profile photos: passive capture, signed full-size URL, selection and queue", { timeout: 60000 }, async () => {
-  const userData = await mkdtemp(path.join(tmpdir(), "xdl-fb-test-"));
+  const userData = await mkdtemp(path.join(tmpdir(), "waku-fb-test-"));
   let context;
   const errors = [];
   try {
@@ -65,7 +66,7 @@ test("Facebook profile photos: passive capture, signed full-size URL, selection 
     assert.ok(!state.items.some(item => item.id === "503" || item.id === "998" || item.id === "999"), "unseen photos, videos and unrelated images must not enter the collection");
     await worker.evaluate(() => chrome.storage.local.set({ panelEnabled: true }));
     await send({ type: "OPEN_PANEL" });
-    let panel = page.frameLocator("#xdownload-panel iframe");
+    let panel = page.frameLocator("#waku-panel iframe");
     await panel.locator("#image-count").filter({ hasText: "1 ảnh" }).waitFor();
     assert.equal(await panel.locator("#profile-name").textContent(), "火只木夏");
     assert.equal(await panel.locator("#post-count").textContent(), "Facebook");
@@ -76,7 +77,7 @@ test("Facebook profile photos: passive capture, signed full-size URL, selection 
     await page.evaluate(() => scrollTo(0, 800));
     state = await waitFor(status, value => value.items.length === 2 && value.items.some(item => item.id === "502" && item.url === large(502)), "scroll should add and upgrade the second photo while collapsed");
     assert.deepEqual(state.selected, ["502"]);
-    await page.locator("#xdownload-launcher").click();
+    await page.locator("#waku-launcher").click();
     await panel.locator("#image-count").filter({ hasText: "2 ảnh" }).waitFor();
     assert.equal(await panel.locator("#destination").textContent(), "WakuDownload / Facebook / 100075970176818 (số ảnh)");
 
@@ -95,7 +96,7 @@ test("Facebook profile photos: passive capture, signed full-size URL, selection 
     assert.equal(settings.filename, "WakuDownload/Facebook/100075970176818 (1)/502.jpg");
     await page.waitForTimeout(500);
     await page.reload();
-    panel = page.frameLocator("#xdownload-panel iframe");
+    panel = page.frameLocator("#waku-panel iframe");
     await panel.locator("#image-count").filter({ hasText: "2 ảnh" }).waitFor();
     await panel.locator("#job-count").filter({ hasText: "0/1" }).waitFor();
     assert.equal(await panel.getByLabel("Chọn ảnh 501", { exact: true }).isChecked(), false);
@@ -105,6 +106,6 @@ test("Facebook profile photos: passive capture, signed full-size URL, selection 
   } finally {
     await context?.close();
     const expected = path.resolve(tmpdir()) + path.sep;
-    if (path.resolve(userData).startsWith(expected) && path.basename(userData).startsWith("xdl-fb-test-")) await rm(userData, { recursive: true, force: true });
+    if (path.resolve(userData).startsWith(expected) && path.basename(userData).startsWith("waku-fb-test-")) await rm(userData, { recursive: true, force: true });
   }
 });

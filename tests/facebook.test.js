@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import "../extension/facebook.js";
-const { profile, isPhotos, photo, photoId, normalize, extract, filename } = globalThis.XDLFB;
+import "../extension/src/platforms/facebook.js";
+const { profile, isPhotos, photo, photoId, normalize, extract, filename } = globalThis.WakuFacebook;
 const signed = "https://scontent-lga3-3.xx.fbcdn.net/v/t39.30808-6/abc_n.jpg?stp=large&_nc_cat=1&oh=abc%2Bdef&oe=123";
 
 test("identifies numeric and named Facebook photo profiles", () => {

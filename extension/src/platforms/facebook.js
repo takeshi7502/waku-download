@@ -102,5 +102,5 @@
     if (!clean) throw new Error("Ảnh Facebook không hợp lệ.");
     return `${legacy ? "FacebookDownload" : "WakuDownload/Facebook"}/${clean.handle}/${clean.id}.${clean.format}`;
   }
-  root.XDLFB = Object.freeze({ isFacebook, handle, profile, isPhotos, photo, photoId, normalize, extract, filename, LIMIT });
+  root.WakuFacebook = Object.freeze({ isFacebook, handle, profile, isPhotos, photo, photoId, normalize, extract, filename, LIMIT });
 })(globalThis);

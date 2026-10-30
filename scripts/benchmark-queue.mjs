@@ -1,14 +1,14 @@
 // Measures extension queue/storage overhead with mocked downloads, not X network speed.
-// Example: node scripts/benchmark-queue.mjs artifacts/background-before-performance.js extension/background.js
+// Example: node scripts/benchmark-queue.mjs extension/src/background.js
 import vm from "node:vm";
 import { readFile } from "node:fs/promises";
 import { randomUUID } from "node:crypto";
 import { performance } from "node:perf_hooks";
 
-const core = await readFile(new URL("../extension/core.js", import.meta.url), "utf8");
-const facebook = await readFile(new URL("../extension/facebook.js", import.meta.url), "utf8");
+const core = await readFile(new URL("../extension/src/platforms/x.js", import.meta.url), "utf8");
+const facebook = await readFile(new URL("../extension/src/platforms/facebook.js", import.meta.url), "utf8");
 const paths = process.argv.slice(2);
-if (!paths.length) paths.push("extension/background.js");
+if (!paths.length) paths.push("extension/src/background.js");
 for (const file of paths) {
   const source = await readFile(file, "utf8");
   const store = {};
@@ -26,14 +26,14 @@ for (const file of paths) {
         Object.assign(store, snapshot);
       }
     } },
-    alarms: { create: async () => {}, onAlarm: { addListener() {} } },
+    alarms: { create: async () => {}, clear: async () => {}, onAlarm: { addListener() {} } },
     downloads: {
       download: async () => { const id = ++nextId; files.set(id, { id, state: "in_progress" }); return id; },
       search: async ({ id }) => files.has(id) ? [files.get(id)] : [],
       onChanged: { addListener: value => { changed = value; } }
     }
   };
-  context = vm.createContext({ chrome, URL, crypto: { randomUUID }, importScripts: (...files) => { for (const file of files) vm.runInContext(file === "facebook.js" ? facebook : core, context); } });
+  context = vm.createContext({ chrome, URL, crypto: { randomUUID }, importScripts: (...files) => { for (const file of files) vm.runInContext(file.endsWith("facebook.js") ? facebook : core, context); } });
   vm.runInContext(source, context);
   await vm.runInContext("serial", context);
   const items = Array.from({ length: 100 }, (_, index) => ({ url: `https://pbs.twimg.com/media/image${index}.jpg`, handle: "example", tweetId: String(1000 + index), text: "x".repeat(200) }));

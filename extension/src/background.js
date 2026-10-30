@@ -1,4 +1,4 @@
-importScripts("core.js", "facebook.js");
+importScripts("platforms/x.js", "platforms/facebook.js");
 
 let job = null;
 let history = {};
@@ -57,9 +57,9 @@ async function pump() {
     if (item.status !== "queued") continue;
     try {
       const legacy = job.pathVersion !== 2;
-      const path = (item.photo.platform === "facebook" ? XDLFB.filename(item.photo, legacy) : XDL.filename(item.photo, legacy)).split("/");
+      const path = (item.photo.platform === "facebook" ? WakuFacebook.filename(item.photo, legacy) : WakuX.filename(item.photo, legacy)).split("/");
       // Existing jobs and retries keep the directory assigned when they started.
-      if (Number.isInteger(job.folderCount) && job.folderCount > 0 && job.folderCount <= XDL.LIMIT) path[legacy ? 1 : 2] += ` (${job.folderCount})`;
+      if (Number.isInteger(job.folderCount) && job.folderCount > 0 && job.folderCount <= WakuX.LIMIT) path[legacy ? 1 : 2] += ` (${job.folderCount})`;
       item.downloadId = await chrome.downloads.download({ url: item.photo.url, filename: path.join("/"), saveAs: false, conflictAction: "uniquify" });
       item.status = "active";
       active++;
@@ -74,11 +74,11 @@ async function pump() {
 async function start(message) {
   if (job?.status === "running") throw new Error("Đang có một lượt tải. Dừng hoặc đợi tải xong trước.");
   const platform = message.platform === "facebook" ? "facebook" : "x";
-  const handle = platform === "facebook" ? XDLFB.handle(message.handle) : XDL.profile(message.handle);
+  const handle = platform === "facebook" ? WakuFacebook.handle(message.handle) : WakuX.profile(message.handle);
   if (!handle || !Array.isArray(message.items)) throw new Error("Danh sách ảnh không hợp lệ.");
   const unique = new Map();
-  for (const raw of message.items.slice(0, XDL.LIMIT)) {
-    const item = platform === "facebook" ? XDLFB.normalize(raw, handle) : XDL.normalize(raw, handle);
+  for (const raw of message.items.slice(0, WakuX.LIMIT)) {
+    const item = platform === "facebook" ? WakuFacebook.normalize(raw, handle) : WakuX.normalize(raw, handle);
     if (item) unique.set(item.id, item);
   }
   if (!unique.size) throw new Error("Chưa chọn ảnh để tải.");
@@ -103,18 +103,18 @@ async function scanMessage(message, sender) {
     await chrome.storage.session.set({ [`panel:${tabId}`]: { collapsed: !!message.collapsed } });
     return {};
   }
-  const isFacebook = XDLFB.isFacebook(sender.url);
-  const handle = isFacebook ? XDLFB.handle(message.handle || message.state?.handle) : XDL.profile(message.handle || message.state?.handle);
+  const isFacebook = WakuFacebook.isFacebook(sender.url);
+  const handle = isFacebook ? WakuFacebook.handle(message.handle || message.state?.handle) : WakuX.profile(message.handle || message.state?.handle);
   if (!handle) throw new Error("Profile không hợp lệ.");
   const key = `scan:${tabId}:${isFacebook ? "facebook:" : ""}${handle.toLowerCase()}`;
   if (message.type === "LOAD_SCAN") return { state: (await chrome.storage.session.get(key))[key] || null };
   const raw = message.state;
   const unique = new Map();
-  for (const value of (Array.isArray(raw.items) ? raw.items : []).slice(0, XDL.LIMIT)) {
-    const item = isFacebook ? XDLFB.normalize(value, handle) : XDL.normalize(value, handle);
+  for (const value of (Array.isArray(raw.items) ? raw.items : []).slice(0, WakuX.LIMIT)) {
+    const item = isFacebook ? WakuFacebook.normalize(value, handle) : WakuX.normalize(value, handle);
     if (item) unique.set(item.id, item);
   }
-  const selected = (Array.isArray(raw.selected) ? raw.selected : []).slice(0, XDL.LIMIT).filter(id => unique.has(id));
+  const selected = (Array.isArray(raw.selected) ? raw.selected : []).slice(0, WakuX.LIMIT).filter(id => unique.has(id));
   let avatar = null;
   try { const url = new URL(raw.avatar); if (url.protocol === "https:" && url.hostname === "pbs.twimg.com" && url.pathname.startsWith("/profile_images/")) avatar = url.href; } catch {}
   await chrome.storage.session.set({ [key]: { platform: isFacebook ? "facebook" : "x", handle, items: [...unique.values()], selected, selectNew: raw.selectNew !== false, name: String(raw.name || handle).slice(0, 80), avatar, scrollTop: Math.max(0, Math.min(1000000, Number(raw.scrollTop) || 0)) } });
@@ -122,7 +122,7 @@ async function scanMessage(message, sender) {
 }
 chrome.runtime.onMessage.addListener((message, sender, reply) => {
   if (scanMessages.has(message.type)) {
-    if (!sender.tab?.id || (!/^https:\/\/(www\.)?(x|twitter)\.com\//.test(sender.url || "") && !XDLFB.isFacebook(sender.url))) return;
+    if (!sender.tab?.id || (!/^https:\/\/(www\.)?(x|twitter)\.com\//.test(sender.url || "") && !WakuFacebook.isFacebook(sender.url))) return;
     // Serialize saves and restores so a quick reload cannot restore an older save.
     exclusiveScan(() => scanMessage(message, sender)).then(result => reply({ ok: true, ...result })).catch(error => reply({ ok: false, error: error.message }));
     return true;
@@ -166,17 +166,19 @@ chrome.downloads.onChanged.addListener(delta => {
   });
 });
 chrome.alarms.onAlarm.addListener(alarm => {
-  if (alarm.name !== "xdl-queue") return;
+  if (alarm.name !== "waku-queue") return;
   void exclusive(async () => { await reconcile(); await pump(); });
 });
 // Alarms and download events wake the worker independently of panel visibility.
-void chrome.alarms.create("xdl-queue", { periodInMinutes: 1 });
+// Remove the pre-rename alarm so upgrading does not leave an extra recurring wakeup.
+void chrome.alarms.clear("xdl-queue");
+void chrome.alarms.create("waku-queue", { periodInMinutes: 1 });
 void exclusive(async () => { await reconcile(); await pump(); });
 
 chrome.action?.onClicked.addListener(tab => {
   void (async () => {
     if (!tab.id) return;
-    if (!/^https:\/\/(www\.)?(x|twitter)\.com\//.test(tab.url || "") && !XDLFB.isFacebook(tab.url)) {
+    if (!/^https:\/\/(www\.)?(x|twitter)\.com\//.test(tab.url || "") && !WakuFacebook.isFacebook(tab.url)) {
       await chrome.tabs.create({ url: "https://x.com/" });
       await chrome.storage.local.set({ panelEnabled: true });
       return;
