@@ -1,0 +1,348 @@
+(() => {
+  "use strict";
+  const CONTENT_VERSION = "1.3.0";
+  const isFacebook = XDLFB.isFacebook(location.href);
+  const normalize = isFacebook ? XDLFB.normalize : XDL.normalize;
+  const seenFacebookScripts = new WeakSet();
+  const collections = new Map();
+  let extensionBase;
+  try { extensionBase = chrome.runtime.getURL(""); } catch { return; }
+  const extensionOrigin = new URL(extensionBase).origin;
+  const lifecycle = new AbortController();
+  let disposed = false;
+  let observer, watchTimer;
+  let active = null;
+  let host, frame, launcher;
+  let enabled = false;
+  let collapsed = false;
+  let panelReady = false;
+  let scanTimer, publishTimer;
+  let lastPath = "";
+  function deactivate() {
+    if (disposed) return;
+    disposed = true;
+    lifecycle.abort();
+    observer?.disconnect();
+    clearInterval(watchTimer);
+    clearTimeout(scanTimer);
+    clearTimeout(publishTimer);
+    for (const collection of collections.values()) clearTimeout(collection.saveTimer);
+    panelReady = false;
+    // The old iframe cannot reconnect after Chrome reloads the extension.
+    // Leave a plain page button that works without calling extension APIs.
+    if (host && launcher) {
+      host.classList.add("collapsed");
+      frame?.remove();
+      launcher.hidden = false;
+      launcher.textContent = "↻";
+      launcher.title = "Tiện ích đã cập nhật — bấm để tải lại trang";
+      launcher.setAttribute("aria-label", launcher.title);
+      launcher.addEventListener("click", () => location.reload(), { once: true });
+    }
+  }
+  function contextReady() {
+    if (disposed) return false;
+    try { if (chrome.runtime?.id) return true; } catch {}
+    deactivate();
+    return false;
+  }
+  // sendMessage can throw before returning a Promise; catch that at an async boundary.
+  async function send(message) {
+    if (!contextReady()) return null;
+    try { return await chrome.runtime.sendMessage(message); }
+    catch (error) {
+      if (/extension context invalidated/i.test(error?.message || "") || !contextReady()) {
+        deactivate();
+        return null;
+      }
+      throw error;
+    }
+  }
+  function registerChromeListener(event, listener) {
+    if (!contextReady()) return false;
+    try { event().addListener(listener); return true; }
+    catch { deactivate(); return false; }
+  }
+
+  function currentHandle() {
+    if (isFacebook) return XDLFB.profile(location.href);
+    const direct = XDL.profile(location.href);
+    if (direct) return direct;
+    const match = location.pathname.match(/^\/([\w]{1,15})\/(?:status\/\d+|with_replies|highlights|articles)(?:\/|$)/);
+    return match ? XDL.profile(match[1]) : null;
+  }
+  function savedState(collection) {
+    return { platform: isFacebook ? "facebook" : "x", handle: collection.handle, items: [...collection.images.values()], selected: [...collection.selected], selectNew: collection.selectNew, scrollTop: collection.scrollTop, name: collection.name, avatar: collection.avatar };
+  }
+  function persist(collection) {
+    if (!contextReady() || !collection || collection.restoring) return;
+    clearTimeout(collection.saveTimer);
+    collection.saveTimer = setTimeout(() => {
+      void send({ type: "SAVE_SCAN", state: savedState(collection) }).catch(() => {});
+    }, 300);
+  }
+  function publish() {
+    if (!contextReady()) return;
+    clearTimeout(publishTimer);
+    publishTimer = setTimeout(() => {
+      if (!contextReady() || !panelReady || !frame) return;
+      frame.contentWindow.postMessage({ type: "XDL_PANEL_STATE", state: snapshot() }, extensionOrigin);
+    }, 40);
+  }
+  function snapshot() {
+    return { platform: isFacebook ? "facebook" : "x", ...(active ? savedState(active) : { handle: null, items: [], selected: [], selectNew: true, scrollTop: 0 }), restoring: active?.restoring || false, onProfile: !!currentHandle(), onPhotos: !isFacebook || XDLFB.isPhotos(location.href), limit: XDL.LIMIT };
+  }
+  function syncProfile() {
+    const handle = currentHandle();
+    if (!handle || active?.handle.toLowerCase() === handle.toLowerCase()) return;
+    persist(active);
+    const key = handle.toLowerCase();
+    if (collections.has(key)) { active = collections.get(key); publish(); return; }
+    const collection = { handle, images: new Map(), candidates: new Map(), selected: new Set(), selectNew: true, scrollTop: 0, name: handle, avatar: null, restoring: true, selectionRevision: 0 };
+    collections.set(key, collection);
+    active = collection;
+    publish();
+    void send({ type: "LOAD_SCAN", handle }).then(result => {
+      const saved = result?.state;
+      if (saved) {
+        const freshIds = new Set(collection.images.keys());
+        const restoredIds = new Set();
+        for (const raw of saved.items || []) {
+          const item = normalize(raw, handle);
+          if (!item) continue;
+          restoredIds.add(item.id);
+          if (!collection.images.has(item.id) && collection.images.size < XDL.LIMIT) collection.images.set(item.id, item);
+        }
+        if (!collection.selectionRevision) {
+          collection.selectNew = saved.selectNew !== false;
+          collection.selected = new Set((saved.selected || []).filter(id => collection.images.has(id)));
+          if (collection.selectNew) for (const id of freshIds) if (!restoredIds.has(id)) collection.selected.add(id);
+          collection.scrollTop = saved.scrollTop || 0;
+        }
+        if (collection.name === handle) collection.name = saved.name || handle;
+        collection.avatar ||= saved.avatar || null;
+      }
+    }).catch(() => {}).finally(() => {
+      collection.restoring = false;
+      persist(collection);
+      if (active === collection) publish();
+    });
+    if (isFacebook) window.postMessage({ type: "XDL_READ_CACHE" }, location.origin);
+  }
+  function ingest(items) {
+    syncProfile();
+    if (!active || !currentHandle() || !Array.isArray(items)) return;
+    let changed = false;
+    for (const raw of items.slice(0, XDL.LIMIT)) {
+      let item = normalize(raw, active.handle);
+      if (!item) continue;
+      if (isFacebook && item.source === "dom") {
+        const candidate = active.candidates.get(item.id);
+        if (candidate && (candidate.width * candidate.height >= item.width * item.height || !candidate.width)) item = candidate;
+      }
+      const previous = active.images.get(item.id);
+      if (!previous) {
+        if (active.images.size >= XDL.LIMIT) break;
+        active.images.set(item.id, item);
+        if (active.selectNew) active.selected.add(item.id);
+        changed = true;
+      } else if (isFacebook && item.source === "api" && (previous.source !== "api" || item.width * item.height > previous.width * previous.height || (item.width * item.height === previous.width * previous.height && item.url !== previous.url))) {
+        active.images.set(item.id, item);
+        changed = true;
+      } else if (!isFacebook && item.source === "api" && (previous.source !== "api" || previous.text !== item.text || previous.date !== item.date)) {
+        active.images.set(item.id, item);
+        changed = true;
+      }
+    }
+    if (changed) { persist(active); publish(); }
+  }
+  function cacheFacebook(data) {
+    if (!active || !XDLFB.isPhotos(location.href)) return;
+    const candidates = XDLFB.extract(data, active.handle);
+    for (const item of candidates) {
+      const previous = active.candidates.get(item.id);
+      if (!previous && active.candidates.size >= XDL.LIMIT) active.candidates.delete(active.candidates.keys().next().value);
+      if (!previous || item.width * item.height >= previous.width * previous.height) active.candidates.set(item.id, item);
+    }
+    ingest(candidates.filter(item => active.images.has(item.id)));
+  }
+  function readFacebookScripts() {
+    // Initial profile data can be embedded in the document before GraphQL requests.
+    for (const script of document.querySelectorAll('script[type="application/json"]')) {
+      if (seenFacebookScripts.has(script)) continue;
+      const text = script.textContent || "";
+      if (!text) continue;
+      if (text.length > 2_000_000) { seenFacebookScripts.add(script); continue; }
+      if (!/"(?:Photo|photo_image|legacy_fbid)"/.test(text)) {
+        if (document.readyState === "complete") seenFacebookScripts.add(script);
+        continue;
+      }
+      try {
+        const data = JSON.parse(text);
+        seenFacebookScripts.add(script);
+        cacheFacebook(data);
+      } catch {
+        // An HTML stream may still be filling this script; retry until page load.
+        if (document.readyState === "complete") seenFacebookScripts.add(script);
+      }
+    }
+  }
+  function readDOM() {
+    syncProfile();
+    if (!active || !currentHandle()) return;
+    if (isFacebook) {
+      if (!XDLFB.isPhotos(location.href)) return;
+      const primary = document.querySelector('[role="main"]') || document.querySelector("main");
+      if (!primary) return;
+      readFacebookScripts();
+      const name = primary.querySelector("h1")?.textContent?.trim() || document.querySelector("h1")?.textContent?.trim();
+      if (name && active.name !== name) { active.name = name.slice(0, 80); persist(active); publish(); }
+      const items = [];
+      for (const link of primary.querySelectorAll('a[href*="photo"]')) {
+        const id = XDLFB.photoId(link.href);
+        if (!id || link.querySelector('video, [aria-label*="video" i]')) continue;
+        for (const image of link.querySelectorAll("img")) {
+          const candidates = [{ url: image.currentSrc || image.src, width: image.naturalWidth || 0 }];
+          for (const part of (image.srcset || "").split(",")) {
+            const match = part.trim().match(/^(\S+)\s+(\d+)w$/);
+            if (match) candidates.push({ url: match[1], width: Number(match[2]) });
+          }
+          candidates.sort((a, b) => b.width - a.width);
+          const best = candidates.find(candidate => XDLFB.photo(candidate.url));
+          if (best) items.push({ id, handle: active.handle, url: best.url, width: best.width, height: image.naturalHeight || 0, text: image.alt || "", source: "dom" });
+        }
+      }
+      ingest(items);
+      return;
+    }
+    const primary = document.querySelector('[data-testid="primaryColumn"]') || document.querySelector("main");
+    if (!primary) return;
+    const name = primary.querySelector('[data-testid="UserName"]')?.innerText?.split("\n")[0]?.trim();
+    const avatar = primary.querySelector('img[src*="pbs.twimg.com/profile_images/"]')?.src;
+    if ((name && name !== active.name) || (avatar && avatar !== active.avatar)) {
+      if (name) active.name = name.slice(0, 80);
+      if (avatar) active.avatar = avatar;
+      persist(active); publish();
+    }
+    const items = [];
+    for (const image of primary.querySelectorAll('img[src*="pbs.twimg.com/media/"]')) {
+      const link = image.closest('a[href*="/status/"]');
+      const match = link?.pathname.match(/^\/([\w]{1,15})\/status\/(\d+)(?:\/photo\/\d+)?\/?$/);
+      if (!match || link.querySelector('video, [data-testid="videoPlayer"], [data-testid="videoComponent"], [data-testid="playButton"]')) continue;
+      const article = image.closest("article");
+      items.push({ url: image.currentSrc || image.src, handle: match[1], tweetId: match[2], text: article?.querySelector('[data-testid="tweetText"]')?.textContent || "", date: article?.querySelector("time")?.dateTime || "", source: "dom" });
+    }
+    ingest(items);
+  }
+  function scheduleRead() {
+    if (!contextReady() || scanTimer) return;
+    scanTimer = setTimeout(() => { scanTimer = null; readDOM(); }, 180);
+  }
+  function setCollapsed(value) {
+    if (!contextReady()) return;
+    collapsed = value;
+    if (!host) return;
+    host.classList.toggle("collapsed", value);
+    frame.hidden = value;
+    launcher.hidden = !value;
+    void send({ type: "PANEL_COLLAPSED", collapsed: value }).catch(() => {});
+    if (!value) publish();
+  }
+  function mount() {
+    if (!contextReady() || !enabled || !document.documentElement || host?.isConnected) return;
+    host = document.createElement("div");
+    host.id = "xdownload-panel";
+    host.dataset.xdownloadVersion = CONTENT_VERSION;
+    const root = host.attachShadow({ mode: "open" });
+    const style = document.createElement("style");
+    style.textContent = `:host{all:initial!important;position:fixed!important;right:12px!important;top:16px!important;bottom:16px!important;width:min(380px,calc(100vw - 24px))!important;z-index:2147483646!important;display:block!important;color-scheme:dark!important}:host(.collapsed){top:16px!important;bottom:auto!important;width:48px!important;height:48px!important}iframe{border:0!important;width:100%!important;height:100%!important;display:block;border-radius:12px;box-shadow:0 8px 38px #0004;background:#111318}button{all:initial;box-sizing:border-box;display:grid;place-items:center;width:48px;height:48px;border:1px solid #aab2ff;border-radius:15px;background:linear-gradient(135deg,#5264ff,#8565ff);box-shadow:0 4px 20px #0004;color:white;cursor:pointer;font:700 17px system-ui}button:hover{filter:brightness(1.1)}button:focus-visible{outline:3px solid #a5afff;outline-offset:3px}[hidden]{display:none!important}`;
+    frame = document.createElement("iframe");
+    frame.title = "Waku Download — bảng tải ảnh";
+    frame.src = `${extensionBase}panel.html#${encodeURIComponent(location.origin)}`;
+    launcher = document.createElement("button");
+    launcher.id = "xdownload-launcher";
+    launcher.textContent = "↓";
+    launcher.title = `Mở lại Waku Download ${CONTENT_VERSION}`;
+    launcher.setAttribute("aria-label", "Mở lại bảng tải ảnh");
+    launcher.addEventListener("click", () => setCollapsed(false), { signal: lifecycle.signal });
+    root.append(style, frame, launcher);
+    document.documentElement.append(host);
+    host.classList.toggle("collapsed", collapsed);
+    frame.hidden = collapsed;
+    launcher.hidden = !collapsed;
+  }
+  function command(message) {
+    if (message.command === "COLLAPSE") { setCollapsed(true); return; }
+    if (!active) return;
+    if (message.command === "SCROLL") {
+      active.scrollTop = Math.max(0, Math.min(1000000, Number(message.scrollTop) || 0));
+      persist(active);
+      return;
+    }
+    active.selectionRevision++;
+    if (message.command === "SELECT") {
+      for (const id of (message.ids || []).slice(0, XDL.LIMIT)) {
+        if (!active.images.has(id)) continue;
+        if (message.selected) active.selected.add(id); else active.selected.delete(id);
+      }
+    }
+    if (message.command === "SELECT_ALL") {
+      active.selectNew = !!message.selected;
+      active.selected = new Set(message.selected ? active.images.keys() : []);
+    }
+    if (message.command === "SELECT_NEW") active.selectNew = !!message.selected;
+    persist(active); publish();
+  }
+  window.addEventListener("message", event => {
+    if (!contextReady()) return;
+    if (event.source === window && event.origin === location.origin && event.data?.type === "XDL_DATA") {
+      if (isFacebook) {
+        syncProfile();
+        if (!active || !XDLFB.isPhotos(location.href)) return;
+        cacheFacebook(event.data.data);
+        scheduleRead();
+      } else ingest(XDL.extract(event.data.data));
+      return;
+    }
+    if (!frame || event.source !== frame.contentWindow || event.origin !== extensionOrigin) return;
+    if (event.data?.type === "XDL_PANEL_READY") { panelReady = true; publish(); }
+    if (event.data?.type === "XDL_PANEL_COMMAND") command(event.data);
+  }, { signal: lifecycle.signal });
+  if (!registerChromeListener(() => chrome.runtime.onMessage, (message, _sender, reply) => {
+    if (!contextReady()) return;
+    if (message.type === "STATUS") { syncProfile(); reply({ ok: true, ...snapshot(), collapsed, enabled }); }
+    if (message.type === "OPEN_PANEL") {
+      enabled = true; collapsed = false; mount(); setCollapsed(false); scheduleRead();
+      reply({ ok: true });
+    }
+  })) return;
+  observer = new MutationObserver(scheduleRead);
+  observer.observe(document, { childList: true, subtree: true, attributes: true, attributeFilter: ["src", "srcset", "href"] });
+  window.addEventListener("scroll", scheduleRead, { passive: true, capture: true, signal: lifecycle.signal });
+  window.addEventListener("popstate", scheduleRead, { signal: lifecycle.signal });
+  document.addEventListener("visibilitychange", () => { if (!document.hidden) { scheduleRead(); publish(); } }, { signal: lifecycle.signal });
+  window.addEventListener("pagehide", () => {
+    for (const collection of collections.values()) {
+      clearTimeout(collection.saveTimer);
+      if (!collection.restoring) void send({ type: "SAVE_SCAN", state: savedState(collection) }).catch(() => {});
+    }
+  }, { signal: lifecycle.signal });
+  watchTimer = setInterval(() => {
+    if (!contextReady()) return;
+    if (lastPath !== location.href) { lastPath = location.href; scheduleRead(); publish(); }
+    if (enabled) mount();
+  }, 1000);
+  if (!registerChromeListener(() => chrome.storage.onChanged, (changes, area) => {
+    if (!contextReady()) return;
+    if (area === "local" && changes.panelEnabled?.newValue) { enabled = true; mount(); }
+  })) return;
+  syncProfile();
+  scheduleRead();
+  void send({ type: "PANEL_INIT" }).then(result => {
+    if (!contextReady()) return;
+    enabled ||= !!result?.enabled;
+    collapsed = !!result?.collapsed;
+    mount();
+    window.postMessage({ type: "XDL_READ_CACHE" }, location.origin);
+  }).catch(() => {});
+})();

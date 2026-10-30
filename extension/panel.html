@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Waku Download</title>
+  <link rel="stylesheet" href="panel.css">
+  <script src="core.js" defer></script>
+  <script src="facebook.js" defer></script>
+  <script src="panel.js" defer></script>
+</head>
+<body>
+  <header><div class="brand"><span class="logo">W↓</span><h1>Waku Download</h1><span class="version">1.3.0</span></div><button id="collapse" class="header-button" title="Thu gọn thành nút nhỏ" aria-label="Thu gọn">»</button></header>
+  <section class="profile card"><div class="avatar"><span id="avatar-fallback">@</span><img id="avatar" alt="" hidden></div><div class="profile-copy"><strong id="profile-name">Mở một profile X</strong><span id="profile-handle">Tab Ảnh / Media</span></div><span class="live"><i></i> Tự nhận</span></section>
+  <section class="options card"><div class="scope"><span>Phạm vi</span><strong>Ảnh đã load trên profile</strong></div><div class="checks"><label><input id="skip-saved" type="checkbox" checked> Bỏ qua ảnh đã tải</label><label><input id="select-new" type="checkbox" checked> Chọn ảnh mới</label></div></section>
+  <section class="collection card">
+    <div class="summary"><div><strong id="post-count">0 bài</strong><span class="dot">·</span><strong id="image-count">0 ảnh</strong></div><label title="Chọn hoặc bỏ chọn toàn bộ ảnh"><input id="select-all" type="checkbox"><span id="selection-count">Chọn tất cả</span></label></div>
+    <p id="hint" class="hint" role="status">Bạn cuộn trang, ảnh mới tự xuất hiện ở đây.</p>
+    <div id="list" class="list"><div id="rows"></div><div id="empty" class="empty"><span>▧</span><strong>Chưa có ảnh nào</strong><p>Mở profile → tab Ảnh rồi cuộn trang.<br>Ảnh sẽ được gom tự động, kể cả khi thu gọn.</p></div><button id="more" class="more" hidden>Hiện thêm bài đăng</button></div>
+  </section>
+  <footer>
+    <div id="job" class="job" hidden><div class="job-heading"><strong id="job-title"></strong><div><button id="retry" class="text-button" hidden>Thử lại</button><button id="cancel" class="text-button" hidden>Dừng tải</button></div></div><div class="progress-line"><progress id="progress" max="1" value="0"></progress><span id="job-count"></span></div><p id="job-detail"></p></div>
+    <p id="error" role="alert" hidden></p>
+    <button id="download" class="download" disabled>↓ <span id="download-label">Chưa có ảnh để tải</span></button>
+    <div class="footer-line"><span id="destination" title="Thư mục lưu ảnh">WakuDownload / X / username</span><button id="open-folder" class="text-button">Mở thư mục ↗</button></div>
+  </footer>
+</body>
+</html>
