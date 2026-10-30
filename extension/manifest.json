@@ -1,25 +1,95 @@
 {
   "manifest_version": 3,
   "name": "Waku Download",
-  "version": "1.1.0",
-  "description": "Gom và tải ảnh đã load trên profile X và Facebook.",
+  "version": "1.2.1",
+  "description": "Gom và tải ảnh đã load trên profile X, Facebook và Pixiv.",
   "minimum_chrome_version": "111",
-  "permissions": ["activeTab", "downloads", "storage", "alarms"],
-  "background": { "service_worker": "src/background.js" },
-  "icons": { "16": "assets/icon16.png", "32": "assets/icon32.png", "48": "assets/icon48.png", "128": "assets/icon128.png" },
-  "action": { "default_title": "Mở Waku Download", "default_icon": { "16": "assets/icon16.png", "32": "assets/icon32.png" } },
-  "web_accessible_resources": [{ "resources": ["panel.html"], "matches": ["https://x.com/*", "https://twitter.com/*", "https://www.x.com/*", "https://www.twitter.com/*", "https://facebook.com/*", "https://*.facebook.com/*"] }],
+  "permissions": [
+    "activeTab",
+    "downloads",
+    "storage",
+    "alarms",
+    "declarativeNetRequest",
+    "offscreen"
+  ],
+  "background": {
+    "service_worker": "src/background.js"
+  },
+  "icons": {
+    "16": "assets/icon16.png",
+    "32": "assets/icon32.png",
+    "48": "assets/icon48.png",
+    "128": "assets/icon128.png"
+  },
+  "action": {
+    "default_title": "Mở Waku Download",
+    "default_icon": {
+      "16": "assets/icon16.png",
+      "32": "assets/icon32.png"
+    }
+  },
+  "web_accessible_resources": [
+    {
+      "resources": [
+        "panel.html"
+      ],
+      "matches": [
+        "https://x.com/*",
+        "https://twitter.com/*",
+        "https://www.x.com/*",
+        "https://www.twitter.com/*",
+        "https://facebook.com/*",
+        "https://*.facebook.com/*",
+        "https://www.pixiv.net/*"
+      ]
+    }
+  ],
   "content_scripts": [
     {
-      "matches": ["https://x.com/*", "https://twitter.com/*", "https://www.x.com/*", "https://www.twitter.com/*", "https://facebook.com/*", "https://*.facebook.com/*"],
-      "js": ["src/bridge.js"],
+      "matches": [
+        "https://x.com/*",
+        "https://twitter.com/*",
+        "https://www.x.com/*",
+        "https://www.twitter.com/*",
+        "https://facebook.com/*",
+        "https://*.facebook.com/*",
+        "https://www.pixiv.net/*"
+      ],
+      "js": [
+        "src/bridge.js"
+      ],
       "run_at": "document_start",
       "world": "MAIN"
     },
     {
-      "matches": ["https://x.com/*", "https://twitter.com/*", "https://www.x.com/*", "https://www.twitter.com/*", "https://facebook.com/*", "https://*.facebook.com/*"],
-      "js": ["src/platforms/x.js", "src/platforms/facebook.js", "src/content.js"],
+      "matches": [
+        "https://x.com/*",
+        "https://twitter.com/*",
+        "https://www.x.com/*",
+        "https://www.twitter.com/*",
+        "https://facebook.com/*",
+        "https://*.facebook.com/*",
+        "https://www.pixiv.net/*"
+      ],
+      "js": [
+        "src/platforms/x.js",
+        "src/platforms/facebook.js",
+        "src/platforms/pixiv.js",
+        "src/content.js"
+      ],
       "run_at": "document_start"
     }
-  ]
+  ],
+  "host_permissions": [
+    "https://i.pximg.net/*"
+  ],
+  "declarative_net_request": {
+    "rule_resources": [
+      {
+        "id": "pixiv_referrer",
+        "enabled": true,
+        "path": "rules/pixiv.json"
+      }
+    ]
+  }
 }

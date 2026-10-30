@@ -1,8 +1,10 @@
 (() => {
   "use strict";
-  const CONTENT_VERSION = "1.1.0";
+  const CONTENT_VERSION = "1.2.1";
   const isFacebook = WakuFacebook.isFacebook(location.href);
-  const normalize = isFacebook ? WakuFacebook.normalize : WakuX.normalize;
+  const isPixiv = location.hostname === "www.pixiv.net";
+  const platform = isPixiv ? "pixiv" : isFacebook ? "facebook" : "x";
+  const normalize = isPixiv ? WakuPixiv.normalize : isFacebook ? WakuFacebook.normalize : WakuX.normalize;
   const seenFacebookScripts = new WeakSet();
   const collections = new Map();
   let extensionBase;
@@ -18,6 +20,10 @@
   let panelReady = false;
   let scanTimer, publishTimer;
   let lastPath = "";
+  let pixivArtwork = null;
+  let pixivLookup = null;
+  let pixivLookupError = 0;
+  let pixivLookupFailed = null;
   function deactivate() {
     if (disposed) return;
     disposed = true;
@@ -65,6 +71,10 @@
   }
 
   function currentHandle() {
+    if (isPixiv) {
+      const id = WakuPixiv.artwork(location.href);
+      return WakuPixiv.profile(location.href) || (id && pixivArtwork?.id === id ? pixivArtwork.owner : null);
+    }
     if (isFacebook) return WakuFacebook.profile(location.href);
     const direct = WakuX.profile(location.href);
     if (direct) return direct;
@@ -72,7 +82,7 @@
     return match ? WakuX.profile(match[1]) : null;
   }
   function savedState(collection) {
-    return { platform: isFacebook ? "facebook" : "x", handle: collection.handle, profileId: collection.profileId, items: [...collection.images.values()], selected: [...collection.selected], selectNew: collection.selectNew, scrollTop: collection.scrollTop, name: collection.name, avatar: collection.avatar };
+    return { platform, handle: collection.handle, profileId: collection.profileId, items: [...collection.images.values()], selected: [...collection.selected], selectNew: collection.selectNew, scrollTop: collection.scrollTop, name: collection.name, avatar: collection.avatar };
   }
   function persist(collection) {
     if (!contextReady() || !collection || collection.restoring) return;
@@ -90,15 +100,22 @@
     }, 40);
   }
   function snapshot() {
-    return { platform: isFacebook ? "facebook" : "x", ...(active ? savedState(active) : { handle: null, items: [], selected: [], selectNew: true, scrollTop: 0 }), restoring: active?.restoring || false, onProfile: !!currentHandle(), onPhotos: !isFacebook || WakuFacebook.isPhotos(location.href), limit: WakuX.LIMIT };
+    const artworkId = isPixiv && WakuPixiv.artwork(location.href);
+    const state = active && (!artworkId || currentHandle()) ? savedState(active) : { handle: null, items: [], selected: [], selectNew: true, scrollTop: 0 };
+    if (artworkId) {
+      state.items = state.items.filter(item => item.tweetId === artworkId);
+      const ids = new Set(state.items.map(item => item.id));
+      state.selected = state.selected.filter(id => ids.has(id));
+    }
+    return { platform, ...state, restoring: active?.restoring || false, onProfile: !!currentHandle(), onPhotos: !isFacebook || WakuFacebook.isPhotos(location.href), pixivErrors: pixivLookupError || active?.pixivErrors || 0, limit: WakuX.LIMIT };
   }
   function syncProfile() {
     const handle = currentHandle();
     if (!handle || active?.handle.toLowerCase() === handle.toLowerCase()) return;
     persist(active);
     const key = handle.toLowerCase();
-    if (collections.has(key)) { active = collections.get(key); publish(); return; }
-    const collection = { handle, profileId: isFacebook && /^\d{1,25}$/.test(handle) ? handle : null, images: new Map(), candidates: new Map(), selected: new Set(), selectNew: true, scrollTop: 0, name: handle, avatar: null, restoring: true, selectionRevision: 0 };
+    if (collections.has(key)) { active = collections.get(key); if (isPixiv) pumpPixiv(active); publish(); return; }
+    const collection = { handle, profileId: (isFacebook || isPixiv) && /^\d{1,25}$/.test(handle) ? handle : null, images: new Map(), candidates: new Map(), pixivPending: new Map(), selected: new Set(), selectNew: true, scrollTop: 0, name: handle, avatar: null, restoring: true, selectionRevision: 0 };
     collections.set(key, collection);
     active = collection;
     publish();
@@ -150,7 +167,7 @@
       } else if (isFacebook && item.source === "api" && (previous.source !== "api" || item.width * item.height > previous.width * previous.height || (item.width * item.height === previous.width * previous.height && item.url !== previous.url))) {
         active.images.set(item.id, item);
         changed = true;
-      } else if (!isFacebook && item.source === "api" && (previous.source !== "api" || previous.text !== item.text || previous.date !== item.date)) {
+      } else if (!isFacebook && !isPixiv && item.source === "api" && (previous.source !== "api" || previous.text !== item.text || previous.date !== item.date)) {
         active.images.set(item.id, item);
         changed = true;
       }
@@ -196,9 +213,77 @@
       }
     }
   }
+  async function pixivGet(path) {
+    const response = await fetch(path, { credentials: "same-origin", signal: lifecycle.signal });
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    const data = await response.json();
+    if (data.error || !data.body) throw new Error(data.message || "Pixiv không trả về dữ liệu");
+    return data.body;
+  }
+  function resolvePixivArtwork() {
+    const id = WakuPixiv.artwork(location.href);
+    if (!id || pixivArtwork?.id === id || pixivLookup?.id === id || pixivLookupFailed === id) return;
+    const lookup = { id };
+    pixivLookup = lookup;
+    pixivLookupError = 0;
+    publish();
+    void pixivGet(`/ajax/illust/${id}`).then(info => {
+      const owner = WakuPixiv.handle(String(info.userId || ""));
+      if (!owner) throw new Error("Không xác định được tác giả Pixiv");
+      if (WakuPixiv.artwork(location.href) !== id || pixivLookup !== lookup) return;
+      pixivArtwork = { id, owner };
+      syncProfile();
+      if (!active.pixivPending.has(id)) active.pixivPending.set(id, { thumbnail: "", status: "queued", info });
+      pumpPixiv(active);
+      publish();
+    }).catch(error => {
+      if (!disposed && error.name !== "AbortError" && WakuPixiv.artwork(location.href) === id) { pixivLookupFailed = id; pixivLookupError = 1; publish(); }
+    }).finally(() => { if (pixivLookup === lookup) pixivLookup = null; });
+  }
+  async function loadPixivWork(collection, id, thumbnail, preloadedInfo) {
+    try {
+      const info = preloadedInfo || await pixivGet(`/ajax/illust/${id}`);
+      if (String(info.userId) !== collection.handle || Number(info.illustType) === 2) return;
+      const pages = await pixivGet(`/ajax/illust/${id}/pages`);
+      if (!Array.isArray(pages)) return;
+      if (active !== collection || currentHandle() !== collection.handle) { collection.pixivPending.get(id).status = "queued"; return; }
+      if (info.userName && collection.name !== info.userName) { collection.name = String(info.userName).slice(0, 80); persist(collection); publish(); }
+      ingest(pages.slice(0, WakuX.LIMIT).map((page, index) => ({ url: page.urls?.original, thumbnail: page.urls?.small || thumbnail, id: `${id}_p${index}`, tweetId: id, handle: collection.handle, text: info.title, date: info.createDate })));
+    } catch (error) {
+      if (!disposed && error.name !== "AbortError") { collection.pixivErrors = (collection.pixivErrors || 0) + 1; publish(); }
+    }
+  }
+  function readPixiv() {
+    const primary = document.querySelector("main") || document.body;
+    if (!primary) return;
+    const name = primary.querySelector("h1")?.textContent?.trim();
+    if (name && active.name === active.handle) { active.name = name.slice(0, 80); persist(active); publish(); }
+    if (WakuPixiv.artwork(location.href)) { pumpPixiv(active); return; }
+    for (const link of primary.querySelectorAll('a[href*="/artworks/"]')) {
+      const id = WakuPixiv.artwork(link.href);
+      if (!id || active.pixivPending.has(id)) continue;
+      const collection = active;
+      const thumbnail = link.querySelector("img")?.src || "";
+      // Limit concurrent requests while collecting every card that has appeared in the DOM.
+      collection.pixivPending.set(id, { thumbnail, status: "queued" });
+    }
+    pumpPixiv(active);
+  }
+  function pumpPixiv(collection) {
+    if (active !== collection || disposed) return;
+    let running = [...collection.pixivPending.values()].filter(entry => entry.status === "running").length;
+    for (const [id, entry] of collection.pixivPending) {
+      if (running >= 3) break;
+      if (entry.status !== "queued") continue;
+      entry.status = "running"; running++;
+      void loadPixivWork(collection, id, entry.thumbnail, entry.info).finally(() => { if (entry.status === "running") entry.status = "done"; pumpPixiv(collection); });
+    }
+  }
   function readDOM() {
+    if (isPixiv && WakuPixiv.artwork(location.href)) resolvePixivArtwork();
     syncProfile();
     if (!active || !currentHandle()) return;
+    if (isPixiv) { readPixiv(); return; }
     if (isFacebook) {
       if (!WakuFacebook.isPhotos(location.href)) return;
       const primary = document.querySelector('[role="main"]') || document.querySelector("main");
@@ -296,8 +381,15 @@
       }
     }
     if (message.command === "SELECT_ALL") {
-      active.selectNew = !!message.selected;
-      active.selected = new Set(message.selected ? active.images.keys() : []);
+      const artworkId = isPixiv && WakuPixiv.artwork(location.href);
+      if (artworkId) {
+        for (const item of active.images.values()) if (item.tweetId === artworkId) {
+          if (message.selected) active.selected.add(item.id); else active.selected.delete(item.id);
+        }
+      } else {
+        active.selectNew = !!message.selected;
+        active.selected = new Set(message.selected ? active.images.keys() : []);
+      }
     }
     if (message.command === "SELECT_NEW") active.selectNew = !!message.selected;
     persist(active); publish();
@@ -310,7 +402,7 @@
         if (!active || !WakuFacebook.isPhotos(location.href)) return;
         cacheFacebook(event.data.data);
         scheduleRead();
-      } else {
+      } else if (!isPixiv) {
         syncProfile();
         const items = WakuX.extract(event.data.data, active?.handle);
         updateAccount(items.account);
@@ -343,7 +435,7 @@
   }, { signal: lifecycle.signal });
   watchTimer = setInterval(() => {
     if (!contextReady()) return;
-    if (lastPath !== location.href) { lastPath = location.href; scheduleRead(); publish(); }
+    if (lastPath !== location.href) { lastPath = location.href; pixivLookupError = 0; pixivLookupFailed = null; scheduleRead(); publish(); }
     if (enabled) mount();
   }, 1000);
   if (!registerChromeListener(() => chrome.storage.onChanged, (changes, area) => {

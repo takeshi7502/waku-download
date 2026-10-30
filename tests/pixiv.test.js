@@ -1,0 +1,20 @@
+﻿import test from "node:test";
+import assert from "node:assert/strict";
+import vm from "node:vm";
+import { readFile } from "node:fs/promises";
+const context = vm.createContext({ URL });
+vm.runInContext(await readFile(new URL("../extension/src/platforms/pixiv.js", import.meta.url), "utf8"), context);
+const P = context.WakuPixiv;
+const url = "https://i.pximg.net/img-original/img/2024/01/02/03/04/05/123_p1.png";
+test("Pixiv profiles and original image validation", () => {
+  assert.equal(P.profile("https://www.pixiv.net/en/users/42/artworks"), "42");
+  assert.equal(P.profile("https://www.pixiv.net/member.php?id=42"), "42");
+  assert.equal(P.profile("https://www.pixiv.net/artworks/123"), null);
+  const item = P.normalize({ url, thumbnail: "https://i.pximg.net/img-master/img/123_p1.jpg", id: "123_p1", tweetId: "123", handle: "42" }, "42");
+  assert.equal(item.url, url);
+  assert.equal(P.filename(item), "WakuDownload/Pixiv/42/123_p1.png");
+  assert.equal(P.normalize({ ...item, url: "https://i.pximg.net/img-master/img/123_p1.png" }, "42"), null);
+  assert.equal(P.normalize({ ...item, url: url.replace("123_p1", "999_p1") }, "42"), null);
+  assert.equal(P.normalize({ ...item, url: url.replace("i.pximg.net", "evil.test") }, "42"), null);
+  assert.equal(P.normalize(item, "43"), null);
+});

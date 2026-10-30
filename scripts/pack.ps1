@@ -5,5 +5,5 @@ $manifest = Get-Content -LiteralPath (Join-Path $extensionPath 'manifest.json') 
 $distPath = Join-Path $projectRoot 'dist'
 New-Item -ItemType Directory -Path $distPath -Force | Out-Null
 $outputPath = Join-Path $distPath "WakuDownload-v$($manifest.version).zip"
-Compress-Archive -Path (Join-Path $extensionPath '*') -DestinationPath $outputPath -Force
+Get-ChildItem -LiteralPath $extensionPath | Where-Object { $_.Name -ne '_metadata' } | Compress-Archive -DestinationPath $outputPath -Force
 Write-Output "Created $outputPath"

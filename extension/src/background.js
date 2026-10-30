@@ -1,11 +1,12 @@
-importScripts("platforms/x.js", "platforms/facebook.js");
+importScripts("platforms/x.js", "platforms/facebook.js", "platforms/pixiv.js");
 
 let job = null;
 let history = {};
 let serial = Promise.resolve();
 let scanSerial = Promise.resolve();
+let offscreenCreation = null;
 const HISTORY_LIMIT = 20000;
-const archiveKey = item => `${item.platform === "facebook" ? "facebook:" : ""}${item.handle.toLowerCase()}:${item.id}`;
+const archiveKey = item => `${item.platform === "facebook" ? "facebook:" : item.platform === "pixiv" ? "pixiv:" : ""}${item.handle.toLowerCase()}:${item.id}`;
 const ready = chrome.storage.local.get(["job", "history"]).then(saved => {
   job = saved.job || null;
   history = saved.history || {};
@@ -27,16 +28,16 @@ function summary() {
 }
 function photoPath(item) {
   const legacy = job.pathVersion !== 2;
-  const path = (item.platform === "facebook" ? WakuFacebook.filename(item, legacy) : WakuX.filename(item, legacy)).split("/");
+  const path = (item.platform === "pixiv" ? WakuPixiv.filename(item) : item.platform === "facebook" ? WakuFacebook.filename(item, legacy) : WakuX.filename(item, legacy)).split("/");
   if (Number.isInteger(job.folderCount) && job.folderCount > 0 && job.folderCount <= WakuX.LIMIT) path[legacy ? 1 : 2] += ` (${job.folderCount})`;
   return path.join("/");
 }
 function sourceText(source, platform, handle) {
-  const id = platform === "facebook" && /^\d{1,25}$/.test(handle) ? handle : source.profileId;
-  const profileUrl = platform === "facebook"
+  const id = (platform === "facebook" || platform === "pixiv") && /^\d{1,25}$/.test(handle) ? handle : source.profileId;
+  const profileUrl = platform === "pixiv" ? `https://www.pixiv.net/users/${handle}` : platform === "facebook"
     ? id ? `https://www.facebook.com/profile.php?id=${id}` : `https://www.facebook.com/${handle}`
     : id ? `https://x.com/i/user/${id}` : `https://x.com/${handle}`;
-  const lines = ["NGUỒN ẢNH", `Nền tảng: ${platform === "facebook" ? "Facebook" : "X"}`, `Tên: ${source.name}`, `Tài khoản: ${platform === "x" ? "@" : ""}${handle}`];
+  const lines = ["NGUỒN ẢNH", `Nền tảng: ${platform === "pixiv" ? "Pixiv" : platform === "facebook" ? "Facebook" : "X"}`, `Tên: ${source.name}`, `Tài khoản: ${platform === "x" ? "@" : ""}${handle}`];
   if (id) lines.push(`ID: ${id}`);
   lines.push(`Link hồ sơ: ${profileUrl}`);
   return "\uFEFF" + lines.join("\r\n") + "\r\n";
@@ -52,6 +53,10 @@ async function save() {
   await chrome.storage.local.set({ job, history });
 }
 function settle(item, state, error) {
+  if ((state === "complete" || state === "interrupted") && item.blobUrl) {
+    void chrome.runtime.sendMessage({ target: "pixiv-offscreen", type: "REVOKE", url: item.blobUrl }).catch(() => {});
+    item.blobUrl = null;
+  }
   if (state === "complete") {
     item.status = "complete";
     history[archiveKey(item.photo)] = Date.now();
@@ -59,6 +64,16 @@ function settle(item, state, error) {
     if (item.status !== "cancelled") item.status = "failed";
     item.error = error || "Tải bị gián đoạn.";
   }
+}
+async function pixivBlob(url) {
+  if (!offscreenCreation) offscreenCreation = (async () => {
+    const exists = chrome.offscreen.hasDocument ? await chrome.offscreen.hasDocument() : (await clients.matchAll()).some(client => client.url === chrome.runtime.getURL("offscreen.html"));
+    if (!exists) await chrome.offscreen.createDocument({ url: "offscreen.html", reasons: ["BLOBS"], justification: "Tải ảnh gốc Pixiv và cung cấp dữ liệu cho trình quản lý tải." });
+  })().finally(() => { offscreenCreation = null; });
+  await offscreenCreation;
+  const result = await chrome.runtime.sendMessage({ target: "pixiv-offscreen", type: "FETCH", url });
+  if (!result?.ok) throw new Error(result?.error || "Không thể lấy ảnh gốc Pixiv.");
+  return result.url;
 }
 async function reconcile() {
   if (!job) return;
@@ -84,10 +99,11 @@ async function pump() {
     if (active >= 3) break;
     if (item.status !== "queued") continue;
     try {
-      item.downloadId = await chrome.downloads.download({ url: item.photo.url, filename: photoPath(item.photo), saveAs: false, conflictAction: "uniquify" });
+      if (item.photo.platform === "pixiv") item.blobUrl = await pixivBlob(item.photo.url);
+      item.downloadId = await chrome.downloads.download({ url: item.blobUrl || item.photo.url, filename: photoPath(item.photo), saveAs: false, conflictAction: "uniquify" });
       item.status = "active";
       active++;
-    } catch (error) { item.status = "failed"; item.error = error.message; }
+    } catch (error) { settle(item, "interrupted", error.message); }
   }
   if (job.source?.status === "queued") {
     try {
@@ -107,12 +123,12 @@ async function pump() {
 }
 async function start(message) {
   if (job?.status === "running") throw new Error("Đang có một lượt tải. Dừng hoặc đợi tải xong trước.");
-  const platform = message.platform === "facebook" ? "facebook" : "x";
-  const handle = platform === "facebook" ? WakuFacebook.handle(message.handle) : WakuX.profile(message.handle);
+  const platform = message.platform === "pixiv" ? "pixiv" : message.platform === "facebook" ? "facebook" : "x";
+  const handle = platform === "pixiv" ? WakuPixiv.handle(message.handle) : platform === "facebook" ? WakuFacebook.handle(message.handle) : WakuX.profile(message.handle);
   if (!handle || !Array.isArray(message.items)) throw new Error("Danh sách ảnh không hợp lệ.");
   const unique = new Map();
   for (const raw of message.items.slice(0, WakuX.LIMIT)) {
-    const item = platform === "facebook" ? WakuFacebook.normalize(raw, handle) : WakuX.normalize(raw, handle);
+    const item = platform === "pixiv" ? WakuPixiv.normalize(raw, handle) : platform === "facebook" ? WakuFacebook.normalize(raw, handle) : WakuX.normalize(raw, handle);
     if (item) unique.set(item.id, item);
   }
   if (!unique.size) throw new Error("Chưa chọn ảnh để tải.");
@@ -140,26 +156,27 @@ async function scanMessage(message, sender) {
     return {};
   }
   const isFacebook = WakuFacebook.isFacebook(sender.url);
-  const handle = isFacebook ? WakuFacebook.handle(message.handle || message.state?.handle) : WakuX.profile(message.handle || message.state?.handle);
+  const isPixiv = WakuPixiv.isPixiv(sender.url);
+  const handle = isPixiv ? WakuPixiv.handle(message.handle || message.state?.handle) : isFacebook ? WakuFacebook.handle(message.handle || message.state?.handle) : WakuX.profile(message.handle || message.state?.handle);
   if (!handle) throw new Error("Profile không hợp lệ.");
-  const key = `scan:${tabId}:${isFacebook ? "facebook:" : ""}${handle.toLowerCase()}`;
+  const key = `scan:${tabId}:${isPixiv ? "pixiv:" : isFacebook ? "facebook:" : ""}${handle.toLowerCase()}`;
   if (message.type === "LOAD_SCAN") return { state: (await chrome.storage.session.get(key))[key] || null };
   const raw = message.state;
   const unique = new Map();
   for (const value of (Array.isArray(raw.items) ? raw.items : []).slice(0, WakuX.LIMIT)) {
-    const item = isFacebook ? WakuFacebook.normalize(value, handle) : WakuX.normalize(value, handle);
+    const item = isPixiv ? WakuPixiv.normalize(value, handle) : isFacebook ? WakuFacebook.normalize(value, handle) : WakuX.normalize(value, handle);
     if (item) unique.set(item.id, item);
   }
   const selected = (Array.isArray(raw.selected) ? raw.selected : []).slice(0, WakuX.LIMIT).filter(id => unique.has(id));
   let avatar = null;
   try { const url = new URL(raw.avatar); if (url.protocol === "https:" && url.hostname === "pbs.twimg.com" && url.pathname.startsWith("/profile_images/")) avatar = url.href; } catch {}
   const profileId = /^\d{1,25}$/.test(String(raw.profileId || "")) ? String(raw.profileId) : null;
-  await chrome.storage.session.set({ [key]: { platform: isFacebook ? "facebook" : "x", handle, profileId, items: [...unique.values()], selected, selectNew: raw.selectNew !== false, name: String(raw.name || handle).slice(0, 80), avatar, scrollTop: Math.max(0, Math.min(1000000, Number(raw.scrollTop) || 0)) } });
+  await chrome.storage.session.set({ [key]: { platform: isPixiv ? "pixiv" : isFacebook ? "facebook" : "x", handle, profileId, items: [...unique.values()], selected, selectNew: raw.selectNew !== false, name: String(raw.name || handle).slice(0, 80), avatar, scrollTop: Math.max(0, Math.min(1000000, Number(raw.scrollTop) || 0)) } });
   return {};
 }
 chrome.runtime.onMessage.addListener((message, sender, reply) => {
   if (scanMessages.has(message.type)) {
-    if (!sender.tab?.id || (!/^https:\/\/(www\.)?(x|twitter)\.com\//.test(sender.url || "") && !WakuFacebook.isFacebook(sender.url))) return;
+    if (!sender.tab?.id || (!/^https:\/\/(www\.)?(x|twitter)\.com\//.test(sender.url || "") && !WakuFacebook.isFacebook(sender.url) && !WakuPixiv.isPixiv(sender.url))) return;
     // Serialize saves and restores so a quick reload cannot restore an older save.
     exclusiveScan(() => scanMessage(message, sender)).then(result => reply({ ok: true, ...result })).catch(error => reply({ ok: false, error: error.message }));
     return true;
@@ -177,7 +194,7 @@ chrome.runtime.onMessage.addListener((message, sender, reply) => {
           // Reconcile first: a completed file must still enter the saved history.
           const [download] = await chrome.downloads.search({ id: item.downloadId });
           if (download?.state === "complete") settle(item, "complete");
-          else { item.status = "cancelled"; await chrome.downloads.cancel(item.downloadId).catch(() => {}); }
+          else { item.status = "cancelled"; await chrome.downloads.cancel(item.downloadId).catch(() => {}); settle(item, "interrupted", "Đã dừng tải."); }
         }
       }
       await save();
@@ -221,7 +238,7 @@ void exclusive(async () => { await reconcile(); await pump(); });
 chrome.action?.onClicked.addListener(tab => {
   void (async () => {
     if (!tab.id) return;
-    if (!/^https:\/\/(www\.)?(x|twitter)\.com\//.test(tab.url || "") && !WakuFacebook.isFacebook(tab.url)) {
+    if (!/^https:\/\/(www\.)?(x|twitter)\.com\//.test(tab.url || "") && !WakuFacebook.isFacebook(tab.url) && !WakuPixiv.isPixiv(tab.url)) {
       await chrome.tabs.create({ url: "https://x.com/" });
       await chrome.storage.local.set({ panelEnabled: true });
       return;

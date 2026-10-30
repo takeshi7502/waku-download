@@ -3,7 +3,7 @@ const $ = id => document.getElementById(id);
 const parentOrigin = (() => {
   try {
     const url = new URL(decodeURIComponent(location.hash.slice(1)));
-    return url.protocol === "https:" && (/^(www\.)?(x|twitter)\.com$/.test(url.hostname) || WakuFacebook.isFacebook(url.href)) ? url.origin : "";
+    return url.protocol === "https:" && (/^(www\.)?(x|twitter)\.com$/.test(url.hostname) || WakuFacebook.isFacebook(url.href) || WakuPixiv.isPixiv(url.href)) ? url.origin : "";
   } catch { return ""; }
 })();
 let state = { items: [], selected: [], handle: null };
@@ -107,7 +107,7 @@ function renderRows(posts, selected) {
     row.element.dataset.photoCount = Math.min(4, post.items.length);
     row.link.textContent = post.text || (state.platform === "facebook" ? `Ảnh Facebook ${post.id}` : `Bài đăng ${post.id}`);
     row.link.title = row.link.textContent;
-    row.link.href = state.platform === "facebook" ? `https://www.facebook.com/photo/?fbid=${post.id}` : `https://x.com/${state.handle}/status/${post.id}`;
+    row.link.href = state.platform === "pixiv" ? `https://www.pixiv.net/artworks/${post.id}` : state.platform === "facebook" ? `https://www.facebook.com/photo/?fbid=${post.id}` : `https://x.com/${state.handle}/status/${post.id}`;
     row.date.textContent = formatDate(post.date) || `#${post.id}`;
     row.date.title = row.date.textContent;
     row.count.textContent = `${post.items.length} ảnh`;
@@ -165,7 +165,7 @@ function render() {
   $("select-all").checked = !!state.items.length && selected.size === state.items.length;
   $("select-all").indeterminate = selected.size > 0 && selected.size < state.items.length;
   $("select-new").checked = state.selectNew !== false;
-  $("hint").textContent = state.restoring ? "Đang khôi phục danh sách đã lưu…" : state.items.length >= state.limit ? `Đã đạt giới hạn ${state.limit} ảnh trong profile này.` : state.platform === "facebook" && !state.onPhotos ? "Mở tab Ảnh của profile Facebook để nhận ảnh." : !state.onProfile && state.handle ? "Đang giữ danh sách cũ. Mở profile để nhận thêm ảnh." : "Bạn cuộn trang, ảnh mới tự xuất hiện ở đây.";
+  $("hint").textContent = state.pixivErrors ? `Kh?ng l?y ???c ?nh g?c c?a ${state.pixivErrors} t?c ph?m. T?i l?i trang v? th? l?i.` : state.restoring ? "Đang khôi phục danh sách đã lưu…" : state.items.length >= state.limit ? `Đã đạt giới hạn ${state.limit} ảnh trong profile này.` : state.platform === "facebook" && !state.onPhotos ? "Mở tab Ảnh của profile Facebook để nhận ảnh." : !state.onProfile && state.handle ? "Đang giữ danh sách cũ. Mở profile để nhận thêm ảnh." : "Bạn cuộn trang, ảnh mới tự xuất hiện ở đây.";
   $("empty").hidden = !!state.items.length;
   $("more").hidden = posts.length <= visible;
   renderRows(posts, selected);
@@ -198,7 +198,7 @@ function renderDestination() {
   const sameProfile = state.handle && currentJob?.handle?.toLowerCase() === state.handle.toLowerCase() && (currentJob.platform || "x") === (state.platform || "x");
   const legacy = sameProfile && currentJob.pathVersion !== 2;
   const count = sameProfile && currentJob.folderCount > 0 ? ` (${currentJob.folderCount})` : legacy ? "" : " (số ảnh)";
-  const base = legacy ? (state.platform === "facebook" ? "FacebookDownload" : "XDownload") : `WakuDownload / ${state.platform === "facebook" ? "Facebook" : "X"}`;
+  const base = legacy ? (state.platform === "facebook" ? "FacebookDownload" : "XDownload") : `WakuDownload / ${state.platform === "pixiv" ? "Pixiv" : state.platform === "facebook" ? "Facebook" : "X"}`;
   $("destination").textContent = `${base} / ${state.handle || "username"}${count}`;
   $("destination").title = sameProfile && currentJob.folderCount > 0 ? "Thư mục của lượt tải gần nhất" : "Số ảnh được thêm vào tên thư mục khi bắt đầu tải";
 }
@@ -208,7 +208,7 @@ function renderJob() {
   const job = currentJob;
   const labels = { running: "Đang tải", complete: "Đã tải xong", cancelled: "Đã dừng tải", finished_with_errors: "Tải xong, có ảnh lỗi" };
   const label = job.status === "finished_with_errors" && !job.failed && job.sourceStatus === "failed" ? "Tải xong, lỗi file nguồn" : labels[job.status] || job.status;
-  $("job-title").textContent = `${label} · ${job.platform === "facebook" ? "FB " : "@"}${job.handle}`;
+  $("job-title").textContent = `${label} · ${job.platform === "pixiv" ? "Pixiv " : job.platform === "facebook" ? "FB " : "@"}${job.handle}`;
   $("job-count").textContent = `${job.done}/${job.total}`;
   $("progress").max = Math.max(1, job.total);
   $("progress").value = job.done + job.failed + job.cancelled;
@@ -233,8 +233,9 @@ window.addEventListener("message", event => {
   if (event.source !== parent || event.origin !== parentOrigin || event.data?.type !== "WAKU_PANEL_STATE") return;
   const raw = event.data.state;
   const facebook = raw?.platform === "facebook";
-  const handle = facebook ? WakuFacebook.handle(raw?.handle) : WakuX.profile(raw?.handle);
-  const items = (Array.isArray(raw?.items) ? raw.items : []).slice(0, WakuX.LIMIT).map(item => facebook ? WakuFacebook.normalize(item, handle) : WakuX.normalize(item, handle)).filter(Boolean);
+  const pixiv = raw?.platform === "pixiv";
+  const handle = pixiv ? WakuPixiv.handle(raw?.handle) : facebook ? WakuFacebook.handle(raw?.handle) : WakuX.profile(raw?.handle);
+  const items = (Array.isArray(raw?.items) ? raw.items : []).slice(0, WakuX.LIMIT).map(item => pixiv ? WakuPixiv.normalize(item, handle) : facebook ? WakuFacebook.normalize(item, handle) : WakuX.normalize(item, handle)).filter(Boolean);
   const validIds = new Set(items.map(item => item.id));
   state = { ...raw, handle, items, selected: (Array.isArray(raw?.selected) ? raw.selected : []).filter(id => validIds.has(id)) };
   render();

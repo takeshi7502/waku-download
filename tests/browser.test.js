@@ -107,7 +107,7 @@ test("docked panel: passive capture, collapse, tab switching, persisted selectio
     await send({ type: "OPEN_PANEL" });
     let panel = page.frameLocator("#waku-panel iframe");
     await panel.locator("#image-count").filter({ hasText: "5 ảnh" }).waitFor();
-    assert.equal(await page.locator("#waku-panel").getAttribute("data-waku-version"), "1.1.0");
+    assert.equal(await page.locator("#waku-panel").getAttribute("data-waku-version"), "1.2.1");
     assert.equal(await panel.locator(".photo").count(), 5);
     await panel.getByLabel("Chọn ảnh second", { exact: true }).uncheck();
     await waitFor(status, value => value.selected.length === 4, "selection should update in the content state");

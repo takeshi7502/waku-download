@@ -1,5 +1,15 @@
 # Changelog
 
+## 1.2.1
+
+- Sửa tải ảnh gốc Pixiv khi máy chủ yêu cầu Referer.
+- Tự nhận ảnh của trang tác phẩm Pixiv và giữ danh sách profile khi chuyển qua lại.
+
+## 1.2.0
+
+- Hỗ trợ gom ảnh trên profile Pixiv, lấy ảnh gốc của từng trang tác phẩm và lưu vào thư mục Pixiv.
+- Thêm link profile Pixiv theo ID vào file nguồn; giữ tiến trình tải và lựa chọn như các nền tảng khác.
+
 ## 1.1.0
 
 - Tạo file `#nguon.txt` trong thư mục tải, ghi tên và link profile của tác giả.

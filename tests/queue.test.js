@@ -6,6 +6,7 @@ import { randomUUID } from "node:crypto";
 
 const core = await readFile(new URL("../extension/src/platforms/x.js", import.meta.url), "utf8");
 const facebook = await readFile(new URL("../extension/src/platforms/facebook.js", import.meta.url), "utf8");
+const pixiv = await readFile(new URL("../extension/src/platforms/pixiv.js", import.meta.url), "utf8");
 const workerCode = await readFile(new URL("../extension/src/background.js", import.meta.url), "utf8");
 const image = id => ({ url: `https://pbs.twimg.com/media/${id}.jpg`, handle: "example", tweetId: "123", source: "api" });
 async function harness(saved = {}, options = {}) {
@@ -59,7 +60,7 @@ async function harness(saved = {}, options = {}) {
       onChanged: { addListener: listener => { onChanged = listener; } }
     }
   };
-  context = vm.createContext({ chrome, URL, crypto: { randomUUID }, console, importScripts: (...files) => { for (const file of files) vm.runInContext(file.endsWith("facebook.js") ? facebook : core, context); } });
+  context = vm.createContext({ chrome, URL, crypto: { randomUUID }, console, importScripts: (...files) => { for (const file of files) vm.runInContext(file.endsWith("pixiv.js") ? pixiv : file.endsWith("facebook.js") ? facebook : core, context); } });
   vm.runInContext(options.workerCode || workerCode, context);
   const sendFrom = (message, sender) => new Promise(resolve => {
     let replied = false;
