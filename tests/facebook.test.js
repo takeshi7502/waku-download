@@ -35,3 +35,12 @@ test("extracts photo media and picks the largest supplied signed URL without inc
   assert.equal(items.find(item => item.id === "123").date, "");
   assert.equal(items.find(item => item.id === "456").url, small);
 });
+test("resolves numeric profile IDs only when the username matches the user or page", () => {
+  const data = { nodes: [
+    { __typename: "User", id: "100075970176818", username: "author.name", name: "Tác giả" },
+    { __typename: "User", id: "999", username: "other", name: "Other" }
+  ] };
+  assert.equal(extract(data, "author.name").account.id, "100075970176818");
+  assert.equal(extract(data, "100075970176818").account.name, "Tác giả");
+  assert.equal(extract(data, "not-author").account, null);
+});

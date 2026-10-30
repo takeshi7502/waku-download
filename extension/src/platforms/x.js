@@ -35,8 +35,9 @@
     if (!/^\d{1,25}$/.test(String(item.tweetId))) return null;
     return { ...image, handle, tweetId: String(item.tweetId), text: String(item.text || "").slice(0, 300), date: String(item.date || "").slice(0, 60), source: item.source === "api" ? "api" : "dom" };
   }
-  function extract(payload) {
+  function extract(payload, targetHandle) {
     const images = new Map();
+    let account = null;
     const visited = new WeakSet();
     const stack = [payload];
     let iterations = 0;
@@ -48,6 +49,14 @@
       const user = node.core?.user_results?.result;
       const handle = user?.core?.screen_name || user?.legacy?.screen_name;
       const tweetId = node.rest_id || legacy?.id_str;
+      for (const candidate of [node, user]) {
+        const username = candidate?.core?.screen_name || candidate?.legacy?.screen_name;
+        const rawId = candidate?.rest_id || candidate?.legacy?.id_str || "";
+        const id = typeof rawId === "string" || Number.isSafeInteger(rawId) ? String(rawId) : "";
+        if (targetHandle && typeof username === "string" && username.toLowerCase() === targetHandle.toLowerCase() && /^\d{1,25}$/.test(id)) {
+          account = { id, name: String(candidate.core?.name || candidate.legacy?.name || "").slice(0, 120) };
+        }
+      }
       if (handle && tweetId && legacy?.extended_entities?.media) {
         for (const media of legacy.extended_entities.media) {
           if (media.type !== "photo") continue;
@@ -57,7 +66,9 @@
       }
       for (const value of Object.values(node)) if (value && typeof value === "object") stack.push(value);
     }
-    return [...images.values()];
+    const result = [...images.values()];
+    result.account = account;
+    return result;
   }
   function filename(item, legacy = false) {
     const clean = normalize(item, item?.handle);

@@ -8,7 +8,7 @@
   const apiUrl = value => {
     try {
       const url = new URL(value, location.origin);
-      const x = /^(www\.)?(x|twitter)\.com$/.test(url.hostname) && url.pathname.includes("/graphql/") && /(?:UserMedia|UserTweets|TweetDetail|SearchTimeline)/.test(url.pathname);
+      const x = /^(www\.)?(x|twitter)\.com$/.test(url.hostname) && url.pathname.includes("/graphql/") && /(?:UserMedia|UserTweets|UserByScreenName|UserByRestId|TweetDetail|SearchTimeline)/.test(url.pathname);
       const facebook = /^(?:(?:www|web|m|mbasic)\.)?facebook\.com$/.test(url.hostname) && url.pathname.startsWith("/api/graphql");
       return x || facebook;
     } catch { return false; }

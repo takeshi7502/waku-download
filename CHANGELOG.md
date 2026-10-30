@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.1.0
+
+- Tạo file `#nguon.txt` trong thư mục tải, ghi tên và link profile của tác giả.
+- Ưu tiên link theo ID nếu dữ liệu trang cung cấp ID khớp với profile; giữ link username khi không có ID.
+- Hiển thị lỗi và hỗ trợ thử lại nếu file nguồn không được tạo.
+
 ## 1.0.0
 
 - Gom ảnh đã tải trên profile X và Facebook khi cuộn trang.

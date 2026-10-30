@@ -17,7 +17,7 @@ async function browserPath() {
   return chromium.executablePath();
 }
 
-test("reloads an unpacked installation from the previous version to 1.0.0 and retains its history", { timeout: 60000 }, async () => {
+test("reloads an unpacked installation from 1.0.0 to 1.1.0 and retains its history", { timeout: 60000 }, async () => {
   const temp = await mkdtemp(path.join(tmpdir(), "waku-version-test-"));
   const extension = path.join(temp, "extension");
   const userData = path.join(temp, "profile");
@@ -27,8 +27,8 @@ test("reloads an unpacked installation from the previous version to 1.0.0 and re
     await cp(source, extension, { recursive: true });
     const manifestPath = path.join(extension, "manifest.json");
     const manifest = JSON.parse(await readFile(manifestPath, "utf8"));
-    assert.equal(manifest.version, "1.0.0");
-    await writeFile(manifestPath, JSON.stringify({ ...manifest, version: "1.3.0" }));
+    assert.equal(manifest.version, "1.1.0");
+    await writeFile(manifestPath, JSON.stringify({ ...manifest, version: "1.0.0" }));
     context = await chromium.launchPersistentContext(userData, { executablePath: await browserPath(), headless: true, args: [`--disable-extensions-except=${extension}`, `--load-extension=${extension}`] });
     const worker = context.serviceWorkers()[0] || await context.waitForEvent("serviceworker");
     const extensionId = new URL(worker.url()).hostname;
@@ -42,10 +42,10 @@ test("reloads an unpacked installation from the previous version to 1.0.0 and re
     let info;
     while (Date.now() < until) {
       info = await manager.evaluate(id => new Promise(resolve => chrome.developerPrivate.getExtensionInfo(id, resolve)), extensionId);
-      if (info?.version === "1.0.0" && info.state === "ENABLED") break;
+      if (info?.version === "1.1.0" && info.state === "ENABLED") break;
       await new Promise(resolve => setTimeout(resolve, 100));
     }
-    assert.equal(info?.version, "1.0.0");
+    assert.equal(info?.version, "1.1.0");
     assert.equal(info?.state, "ENABLED");
     const panel = await context.newPage();
     await panel.goto(`chrome-extension://${extensionId}/panel.html`);

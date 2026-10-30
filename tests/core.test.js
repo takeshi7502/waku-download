@@ -36,3 +36,11 @@ test("supports X's newer user core shape and refuses unowned/unidentified media"
   assert.equal(normalize({ url: "https://pbs.twimg.com/media/a.jpg", handle: "example", tweetId: "../escape" }, "example"), null);
   assert.equal(filename({ url: "https://pbs.twimg.com/media/a.jpg", handle: "example", tweetId: "123" }), "WakuDownload/X/example/123_a.jpg");
 });
+test("finds the numeric profile ID only for the requested X account", () => {
+  const user = { __typename: "User", rest_id: "987654321", core: { screen_name: "example", name: "Tên tác giả" } };
+  const unrelated = { __typename: "User", rest_id: "111", core: { screen_name: "other", name: "Other" } };
+  const result = extract({ data: [user, unrelated] }, "example");
+  assert.equal(result.account.id, "987654321");
+  assert.equal(result.account.name, "Tên tác giả");
+  assert.equal(extract({ data: [user] }, "other").account, null);
+});

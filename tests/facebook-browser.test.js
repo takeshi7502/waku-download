@@ -94,6 +94,10 @@ test("Facebook profile photos: passive capture, signed full-size URL, selection 
     const settings = await worker.evaluate(() => downloadSettings[0]);
     assert.equal(settings.url, large(502), "signed URL must reach Chrome unchanged");
     assert.equal(settings.filename, "WakuDownload/Facebook/100075970176818 (1)/502.jpg");
+    const source = await worker.evaluate(() => downloadSettings.find(item => item.filename.endsWith("/#nguon.txt")));
+    assert.equal(source.filename, "WakuDownload/Facebook/100075970176818 (1)/#nguon.txt");
+    assert.match(decodeURIComponent(source.url.split(",")[1]), /Tên: 火只木夏/);
+    assert.match(decodeURIComponent(source.url.split(",")[1]), /facebook\.com\/profile\.php\?id=100075970176818/);
     await page.waitForTimeout(500);
     await page.reload();
     panel = page.frameLocator("#waku-panel iframe");

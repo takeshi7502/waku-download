@@ -23,7 +23,7 @@ async function browserPath() {
   return chromium.executablePath();
 }
 const media = id => ({ type: "photo", media_url_https: `https://pbs.twimg.com/media/${id}.jpg` });
-const tweet = (handle, id, photos) => ({ rest_id: id, core: { user_results: { result: { core: { screen_name: handle } } } }, legacy: { full_text: `Ảnh của ${handle} — bài ${id}`, created_at: "2026-10-29T02:30:00Z", extended_entities: { media: photos.map(media) } } });
+const tweet = (handle, id, photos) => ({ rest_id: id, core: { user_results: { result: { rest_id: handle === "example" ? "987654321" : "111", core: { screen_name: handle, name: handle } } } }, legacy: { full_text: `Ảnh của ${handle} — bài ${id}`, created_at: "2026-10-29T02:30:00Z", extended_entities: { media: photos.map(media) } } });
 const responses = {
   initial: { data: { timeline: [tweet("example", "111", ["first", "second", "third", "fourth"]), tweet("other", "222", ["ignoreOther"])] } },
   scroll: { data: { timeline: [tweet("example", "333", ["afterScroll", "anotherPhoto"])] } },
@@ -101,12 +101,13 @@ test("docked panel: passive capture, collapse, tab switching, persisted selectio
     const status = () => send({ type: "STATUS" });
     let state = await waitFor(status, value => value.items.length === 5 && !value.restoring, "initial photos should be captured without pressing a collect button");
     assert.ok(!state.items.some(item => item.id === "videoOnly" || item.id === "ignoreOther"));
+    assert.equal(state.profileId, "987654321");
     assert.equal(await page.evaluate(() => scrollY), 0, "extension must not scroll the page automatically");
     await worker.evaluate(() => chrome.storage.local.set({ panelEnabled: true }));
     await send({ type: "OPEN_PANEL" });
     let panel = page.frameLocator("#waku-panel iframe");
     await panel.locator("#image-count").filter({ hasText: "5 ảnh" }).waitFor();
-    assert.equal(await page.locator("#waku-panel").getAttribute("data-waku-version"), "1.0.0");
+    assert.equal(await page.locator("#waku-panel").getAttribute("data-waku-version"), "1.1.0");
     assert.equal(await panel.locator(".photo").count(), 5);
     await panel.getByLabel("Chọn ảnh second", { exact: true }).uncheck();
     await waitFor(status, value => value.selected.length === 4, "selection should update in the content state");
@@ -141,9 +142,9 @@ test("docked panel: passive capture, collapse, tab switching, persisted selectio
 
     // Hold browser downloads in progress to verify real iframe -> worker messaging and UI persistence.
     await worker.evaluate(() => {
-      globalThis.testDownloads = new Map();
+      globalThis.testDownloads = new Map(); globalThis.downloadSettings = [];
       let id = 500;
-      chrome.downloads.download = async settings => { const next = ++id; testDownloads.set(next, { id: next, state: "in_progress", url: settings.url }); return next; };
+      chrome.downloads.download = async settings => { downloadSettings.push(settings); const next = ++id; testDownloads.set(next, { id: next, state: "in_progress", url: settings.url }); return next; };
       chrome.downloads.search = async query => testDownloads.has(query.id) ? [testDownloads.get(query.id)] : [];
       chrome.downloads.cancel = async id => { testDownloads.get(id).state = "interrupted"; };
     });
@@ -154,6 +155,9 @@ test("docked panel: passive capture, collapse, tab switching, persisted selectio
     await panel.locator("#download").click();
     await panel.locator("#job-title").filter({ hasText: "Đang tải" }).waitFor();
     assert.equal(await panel.locator("#job-count").textContent(), "0/33");
+    const source = await worker.evaluate(() => downloadSettings.find(item => item.filename.endsWith("/#nguon.txt")));
+    assert.equal(source.filename, "WakuDownload/X/example (33)/#nguon.txt");
+    assert.match(decodeURIComponent(source.url.split(",")[1]), /https:\/\/x\.com\/i\/user\/987654321/);
     assert.equal(await panel.locator("#destination").textContent(), "WakuDownload / X / example (33)");
     assert.equal(await panel.locator("#rows").evaluate(() => globalThis.progressRowMutations), 0, "progress updates must not rebuild row text or previews");
     const footerBefore = await panel.locator("footer").boundingBox();

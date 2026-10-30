@@ -4,7 +4,7 @@ Tiện ích Chrome và Microsoft Edge giúp gom và tải hàng loạt ảnh đ�
 
 ## Cài đặt
 
-1. Tải `WakuDownload-v1.0.0.zip` từ [GitHub Releases](https://github.com/takeshi7502/waku-download/releases/latest) và giải nén.
+1. Tải gói ZIP của bản phát hành từ [GitHub Releases](https://github.com/takeshi7502/waku-download/releases/latest) và giải nén.
 2. Mở `chrome://extensions` hoặc `edge://extensions`, bật **Developer mode / Chế độ dành cho nhà phát triển**.
 3. Chọn **Load unpacked / Tải tiện ích đã giải nén**, rồi chọn thư mục vừa giải nén có chứa `manifest.json`.
 4. Ghim **Waku Download** trong menu tiện ích và tải lại tab X hoặc Facebook đang mở.
@@ -29,6 +29,8 @@ WakuDownload/
 ```
 
 Số trong tên thư mục là số ảnh của lượt tải sau khi bỏ trùng và ảnh đã lưu. Tên được đặt lúc bắt đầu tải; nếu dừng hoặc có ảnh lỗi, số file thành công có thể ít hơn. Thử lại ảnh lỗi dùng cùng thư mục. Có thể tắt **Bỏ qua ảnh đã tải** để tải lại những ảnh đã lưu trước đây.
+
+Mỗi lượt tải còn có một file `#nguon.txt` trong cùng thư mục, ghi nền tảng, tên tác giả, tài khoản và link profile. Nếu dữ liệu trang có ID số của đúng profile, link ưu tiên dạng ID; nếu không có ID, file giữ link theo username. Việc nhận ID dùng dữ liệu trang đã tải, không yêu cầu thêm API hay dịch vụ ngoài. Nếu thư mục đã có `#nguon.txt`, Chrome có thể thêm số vào tên file mới để tránh ghi đè file cũ.
 
 Để tránh hộp thoại xuất hiện cho từng ảnh, tắt tùy chọn hỏi vị trí lưu trước mỗi lượt tải trong phần Downloads của trình duyệt.
 
@@ -69,6 +71,6 @@ npm.cmd run test:browser
 npm.cmd run pack
 ```
 
-Gói cài đặt được tạo tại `dist/WakuDownload-v1.0.0.zip`, với `manifest.json` ở ngay thư mục gốc của tệp ZIP. Có thể đặt biến môi trường `WAKU_CHROMIUM` thành đường dẫn Chromium để kiểm thử bằng trình duyệt có sẵn. Dữ liệu X/Facebook trong kiểm thử trình duyệt được mô phỏng; kiểm thử không đăng nhập tài khoản thật.
+Gói cài đặt được tạo tại `dist/WakuDownload-v<phiên bản>.zip`, với `manifest.json` ở ngay thư mục gốc của tệp ZIP. Có thể đặt biến môi trường `WAKU_CHROMIUM` thành đường dẫn Chromium để kiểm thử bằng trình duyệt có sẵn. Dữ liệu X/Facebook trong kiểm thử trình duyệt được mô phỏng; kiểm thử không đăng nhập tài khoản thật.
 
 Nếu sau khi cập nhật Chrome vẫn hiển thị `Extension context invalidated`, hãy tải lại các tab X/Facebook và xóa lịch sử lỗi cũ trong trang tiện ích. Chrome có thể giữ dấu vết lỗi từ phiên trước.

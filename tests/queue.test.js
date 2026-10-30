@@ -17,6 +17,7 @@ async function harness(saved = {}, options = {}) {
   let onChanged;
   let onAlarm;
   const calls = [];
+  const sourceCalls = [];
   const writes = [];
   const operations = [];
   let context;
@@ -39,6 +40,13 @@ async function harness(saved = {}, options = {}) {
     alarms: { create: async () => {}, clear: async () => {}, onAlarm: { addListener: listener => { onAlarm = listener; } } },
     downloads: {
       download: async settings => {
+        if (settings.filename.endsWith("/#nguon.txt")) {
+          sourceCalls.push(settings);
+          if (options.failSource?.(settings)) throw new Error("SOURCE_FAILED");
+          const sourceId = -sourceCalls.length;
+          downloads.set(sourceId, { id: sourceId, state: options.sourceState || "complete", url: settings.url });
+          return sourceId;
+        }
         calls.push(settings);
         operations.push("download");
         if (options.fail?.(settings)) throw new Error("NETWORK_FAILED");
@@ -61,7 +69,7 @@ async function harness(saved = {}, options = {}) {
   const send = message => sendFrom(message, { url: "chrome-extension://test/panel.html", tab: { id: 1 } });
   const flush = () => send({ type: "JOB" });
   await flush();
-  return { store, session, calls, writes, operations, downloads, send, sendFrom, flush, alarm: async () => { onAlarm({ name: "waku-queue" }); return flush(); }, complete: async (downloadId, state = "complete") => {
+  return { store, session, calls, sourceCalls, writes, operations, downloads, send, sendFrom, flush, alarm: async () => { onAlarm({ name: "waku-queue" }); return flush(); }, complete: async (downloadId, state = "complete") => {
     downloads.get(downloadId).state = state;
     onChanged({ id: downloadId, state: { current: state }, ...(state === "interrupted" ? { error: { current: "NETWORK_FAILED" } } : {}) });
     return flush();
@@ -126,13 +134,14 @@ test("a pending scan save cannot hold up active downloads", async () => {
 test("isolates saved collections by tab/profile and restores selected images without accepting arbitrary URLs", async () => {
   const h = await harness({ panelEnabled: true });
   const tab = id => ({ url: "https://x.com/example/media", tab: { id } });
-  const saved = await h.sendFrom({ type: "SAVE_SCAN", state: { handle: "example", items: [image("a"), image("a"), { ...image("bad"), url: "https://evil.com/a.jpg" }], selected: ["a", "bad"], selectNew: false, scrollTop: 450, avatar: "https://evil.com/avatar.jpg" } }, tab(1));
+  const saved = await h.sendFrom({ type: "SAVE_SCAN", state: { handle: "example", profileId: "987654321", items: [image("a"), image("a"), { ...image("bad"), url: "https://evil.com/a.jpg" }], selected: ["a", "bad"], selectNew: false, scrollTop: 450, avatar: "https://evil.com/avatar.jpg" } }, tab(1));
   assert.equal(saved.ok, true);
   await h.sendFrom({ type: "SAVE_SCAN", state: { handle: "example", items: [image("b")], selected: [] } }, tab(2));
   const first = await h.sendFrom({ type: "LOAD_SCAN", handle: "example" }, tab(1));
   assert.equal(first.state.items.length, 1);
   assert.deepEqual(Array.from(first.state.selected), ["a"]);
   assert.equal(first.state.avatar, null);
+  assert.equal(first.state.profileId, "987654321");
   assert.equal(first.state.selectNew, false);
   assert.equal(first.state.scrollTop, 450);
   const second = await h.sendFrom({ type: "LOAD_SCAN", handle: "example" }, tab(2));
@@ -158,8 +167,52 @@ test("Facebook downloads use signed CDN URLs, separate folders and a separate sa
   assert.ok(h.store.history["facebook:example:123"]);
   const skipped = await h.send({ type: "DOWNLOAD", platform: "facebook", handle: "example", items: [photo] });
   assert.equal(skipped.job.skipped, 1);
+  assert.equal(h.sourceCalls.length, 1, "a batch with no photos to download should not create another source file");
   const invalid = await h.send({ type: "DOWNLOAD", platform: "facebook", handle: "example", items: [{ ...photo, url: "https://evil.com/v/a.jpg" }] });
   assert.equal(invalid.ok, false);
+});
+test("creates one UTF-8 source file in the photo folder with a stable X profile link", async () => {
+  const h = await harness();
+  const result = await h.send({ type: "DOWNLOAD", handle: "example", name: "Tên tác giả", profileId: "987654321", items: [image("a"), image("b")] });
+  assert.equal(result.job.total, 2);
+  assert.equal(result.job.sourceStatus, "complete");
+  assert.equal(h.sourceCalls.length, 1);
+  assert.equal(h.sourceCalls[0].filename, "WakuDownload/X/example (2)/#nguon.txt");
+  const text = decodeURIComponent(h.sourceCalls[0].url.split(",")[1]);
+  assert.ok(text.startsWith("\uFEFF"));
+  assert.match(text, /Tên: Tên tác giả/);
+  assert.match(text, /ID: 987654321/);
+  assert.match(text, /Link hồ sơ: https:\/\/x\.com\/i\/user\/987654321/);
+  assert.deepEqual(Object.keys(h.store.history), [], "source files must not enter the photo archive");
+});
+test("writes numeric Facebook links and falls back to a username when no ID is available", async () => {
+  const signed = "https://scontent.xx.fbcdn.net/v/t39/a_n.jpg?oh=signature";
+  const h = await harness();
+  const photo = { handle: "100075970176818", id: "123", url: signed };
+  await h.send({ type: "DOWNLOAD", platform: "facebook", handle: photo.handle, name: "火只木夏", items: [photo] });
+  assert.equal(h.sourceCalls[0].filename, "WakuDownload/Facebook/100075970176818 (1)/#nguon.txt");
+  assert.match(decodeURIComponent(h.sourceCalls[0].url.split(",")[1]), /https:\/\/www\.facebook\.com\/profile\.php\?id=100075970176818/);
+  await h.complete(1);
+  await h.send({ type: "DOWNLOAD", platform: "facebook", handle: "author.name", name: "Tác giả", profileId: "100075970176818", items: [{ ...photo, handle: "author.name", id: "456" }] });
+  assert.match(decodeURIComponent(h.sourceCalls[1].url.split(",")[1]), /facebook\.com\/profile\.php\?id=100075970176818/);
+  await h.complete(2);
+  await h.send({ type: "DOWNLOAD", handle: "other", name: "Other", items: [{ ...image("c"), handle: "other" }] });
+  assert.match(decodeURIComponent(h.sourceCalls[2].url.split(",")[1]), /Link hồ sơ: https:\/\/x\.com\/other/);
+});
+test("waits for source-file completion and allows retrying an interrupted source file", async () => {
+  const h = await harness({}, { sourceState: "in_progress" });
+  await h.send({ type: "DOWNLOAD", handle: "example", items: [image("a")] });
+  const photoDone = await h.complete(1);
+  assert.equal(photoDone.job.status, "running");
+  const interrupted = await h.complete(-1, "interrupted");
+  assert.equal(interrupted.job.status, "finished_with_errors");
+  assert.equal(interrupted.job.sourceStatus, "failed");
+  const retry = await h.send({ type: "RETRY_DOWNLOAD" });
+  assert.equal(retry.job.sourceStatus, "active");
+  assert.equal(h.calls.length, 1, "retrying the source file must not redownload successful photos");
+  const completed = await h.complete(-2);
+  assert.equal(completed.job.status, "complete");
+  assert.equal(completed.job.sourceStatus, "complete");
 });
 test("folder count reflects this batch after duplicates and saved photos are removed, including retries", async () => {
   const h = await harness({ history: { "example:a": 1 } });

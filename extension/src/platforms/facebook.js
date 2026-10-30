@@ -59,6 +59,7 @@
   function extract(payload, owner) {
     if (!handle(owner)) return [];
     const images = new Map();
+    let account = null;
     const visited = new WeakSet();
     const stack = [payload];
     let iterations = 0;
@@ -68,6 +69,14 @@
       visited.add(node);
       const type = node.__typename || node.__isMedia || node.__isNode;
       const isPhoto = type === "Photo" || (!!node.legacy_fbid && !!node.photo_image && !/video/i.test(String(type || "")));
+      if (["User", "Page", "Profile"].includes(type)) {
+        const rawId = node.legacy_fbid || node.profile_id || node.user_id || node.id || "";
+        const id = typeof rawId === "string" || Number.isSafeInteger(rawId) ? String(rawId) : "";
+        const username = String(node.username || node.vanity || "");
+        const linkedProfile = profile(node.url || node.profile_url || "");
+        const matches = /^\d+$/.test(owner) ? id === owner : username.toLowerCase() === owner.toLowerCase() || linkedProfile?.toLowerCase() === owner.toLowerCase();
+        if (matches && /^\d{1,25}$/.test(id)) account = { id, name: String(node.name || "").slice(0, 120) };
+      }
       if (isPhoto) {
         const rawId = String(node.legacy_fbid || node.photo_id || node.id || "");
         const id = /^\d{1,25}$/.test(rawId) ? rawId : photoId(node.url || node.photo_url || "");
@@ -95,7 +104,9 @@
       }
       for (const value of Object.values(node)) if (value && typeof value === "object") stack.push(value);
     }
-    return [...images.values()];
+    const result = [...images.values()];
+    result.account = account;
+    return result;
   }
   function filename(item, legacy = false) {
     const clean = normalize(item, item?.handle);

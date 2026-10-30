@@ -207,24 +207,25 @@ function renderJob() {
   if (!currentJob) return;
   const job = currentJob;
   const labels = { running: "Đang tải", complete: "Đã tải xong", cancelled: "Đã dừng tải", finished_with_errors: "Tải xong, có ảnh lỗi" };
-  $("job-title").textContent = `${labels[job.status] || job.status} · ${job.platform === "facebook" ? "FB " : "@"}${job.handle}`;
+  const label = job.status === "finished_with_errors" && !job.failed && job.sourceStatus === "failed" ? "Tải xong, lỗi file nguồn" : labels[job.status] || job.status;
+  $("job-title").textContent = `${label} · ${job.platform === "facebook" ? "FB " : "@"}${job.handle}`;
   $("job-count").textContent = `${job.done}/${job.total}`;
   $("progress").max = Math.max(1, job.total);
   $("progress").value = job.done + job.failed + job.cancelled;
-  $("job-detail").textContent = [job.active ? `${job.active} đang tải` : "", job.queued ? `${job.queued} đang đợi` : "", job.skipped ? `Bỏ qua ${job.skipped} ảnh đã tải` : "", job.failed ? `${job.failed} ảnh lỗi: ${job.errors?.[0] || "Tải gián đoạn"}` : "", job.cancelled ? `${job.cancelled} ảnh chưa tải` : ""].filter(Boolean).join(" · ");
+  $("job-detail").textContent = [job.active ? `${job.active} đang tải` : "", job.queued ? `${job.queued} đang đợi` : "", job.skipped ? `Bỏ qua ${job.skipped} ảnh đã tải` : "", job.failed ? `${job.failed} ảnh lỗi: ${job.errors?.[0] || "Tải gián đoạn"}` : "", job.sourceStatus === "failed" ? `Lỗi #nguon.txt: ${job.sourceError}` : "", job.cancelled ? `${job.cancelled} ảnh chưa tải` : ""].filter(Boolean).join(" · ");
   $("job-detail").title = $("job-detail").textContent;
   $("cancel").hidden = job.status !== "running";
-  $("retry").hidden = !job.failed || job.status === "running";
+  $("retry").hidden = (!job.failed && job.sourceStatus !== "failed") || job.status === "running";
 }
 function summarize(job) {
   if (!job) return null;
   const count = status => job.items.filter(item => item.status === status).length;
-  return { handle: job.handle, platform: job.platform || "x", pathVersion: job.pathVersion || 1, folderCount: job.folderCount ?? null, status: job.status, total: job.items.length, done: count("complete"), failed: count("failed"), active: count("active"), queued: count("queued"), cancelled: count("cancelled"), skipped: job.skipped, errors: job.items.filter(item => item.status === "failed").slice(0, 3).map(item => item.error) };
+  return { handle: job.handle, platform: job.platform || "x", pathVersion: job.pathVersion || 1, folderCount: job.folderCount ?? null, status: job.status, total: job.items.length, done: count("complete"), failed: count("failed"), active: count("active"), queued: count("queued"), cancelled: count("cancelled"), skipped: job.skipped, sourceStatus: job.source?.status || null, sourceError: job.source?.error || "", errors: job.items.filter(item => item.status === "failed").slice(0, 3).map(item => item.error) };
 }
 async function startDownload(items) {
   if (busy.has("download")) return;
   busy.add("download"); updateProgress();
-  try { currentJob = (await worker({ type: "DOWNLOAD", platform: state.platform, handle: state.handle, items, skipSaved: $("skip-saved").checked })).job; }
+  try { currentJob = (await worker({ type: "DOWNLOAD", platform: state.platform, handle: state.handle, name: state.name, profileId: state.profileId, items, skipSaved: $("skip-saved").checked })).job; }
   catch (error) { showError(error); }
   finally { busy.delete("download"); updateProgress(); }
 }

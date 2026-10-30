@@ -1,6 +1,6 @@
 (() => {
   "use strict";
-  const CONTENT_VERSION = "1.0.0";
+  const CONTENT_VERSION = "1.1.0";
   const isFacebook = WakuFacebook.isFacebook(location.href);
   const normalize = isFacebook ? WakuFacebook.normalize : WakuX.normalize;
   const seenFacebookScripts = new WeakSet();
@@ -72,7 +72,7 @@
     return match ? WakuX.profile(match[1]) : null;
   }
   function savedState(collection) {
-    return { platform: isFacebook ? "facebook" : "x", handle: collection.handle, items: [...collection.images.values()], selected: [...collection.selected], selectNew: collection.selectNew, scrollTop: collection.scrollTop, name: collection.name, avatar: collection.avatar };
+    return { platform: isFacebook ? "facebook" : "x", handle: collection.handle, profileId: collection.profileId, items: [...collection.images.values()], selected: [...collection.selected], selectNew: collection.selectNew, scrollTop: collection.scrollTop, name: collection.name, avatar: collection.avatar };
   }
   function persist(collection) {
     if (!contextReady() || !collection || collection.restoring) return;
@@ -98,7 +98,7 @@
     persist(active);
     const key = handle.toLowerCase();
     if (collections.has(key)) { active = collections.get(key); publish(); return; }
-    const collection = { handle, images: new Map(), candidates: new Map(), selected: new Set(), selectNew: true, scrollTop: 0, name: handle, avatar: null, restoring: true, selectionRevision: 0 };
+    const collection = { handle, profileId: isFacebook && /^\d{1,25}$/.test(handle) ? handle : null, images: new Map(), candidates: new Map(), selected: new Set(), selectNew: true, scrollTop: 0, name: handle, avatar: null, restoring: true, selectionRevision: 0 };
     collections.set(key, collection);
     active = collection;
     publish();
@@ -120,6 +120,7 @@
           collection.scrollTop = saved.scrollTop || 0;
         }
         if (collection.name === handle) collection.name = saved.name || handle;
+        if (!collection.profileId && /^\d{1,25}$/.test(saved.profileId || "")) collection.profileId = saved.profileId;
         collection.avatar ||= saved.avatar || null;
       }
     }).catch(() => {}).finally(() => {
@@ -159,12 +160,20 @@
   function cacheFacebook(data) {
     if (!active || !WakuFacebook.isPhotos(location.href)) return;
     const candidates = WakuFacebook.extract(data, active.handle);
+    updateAccount(candidates.account);
     for (const item of candidates) {
       const previous = active.candidates.get(item.id);
       if (!previous && active.candidates.size >= WakuX.LIMIT) active.candidates.delete(active.candidates.keys().next().value);
       if (!previous || item.width * item.height >= previous.width * previous.height) active.candidates.set(item.id, item);
     }
     ingest(candidates.filter(item => active.images.has(item.id)));
+  }
+  function updateAccount(account) {
+    if (!active || !account || !/^\d{1,25}$/.test(account.id || "")) return;
+    let changed = false;
+    if (active.profileId !== account.id) { active.profileId = account.id; changed = true; }
+    if (account.name && (active.name === active.handle || !active.name)) { active.name = account.name; changed = true; }
+    if (changed) { persist(active); publish(); }
   }
   function readFacebookScripts() {
     // Initial profile data can be embedded in the document before GraphQL requests.
@@ -173,7 +182,7 @@
       const text = script.textContent || "";
       if (!text) continue;
       if (text.length > 2_000_000) { seenFacebookScripts.add(script); continue; }
-      if (!/"(?:Photo|photo_image|legacy_fbid)"/.test(text)) {
+      if (!/"(?:Photo|photo_image|legacy_fbid|User|Page|Profile)"/.test(text)) {
         if (document.readyState === "complete") seenFacebookScripts.add(script);
         continue;
       }
@@ -301,7 +310,12 @@
         if (!active || !WakuFacebook.isPhotos(location.href)) return;
         cacheFacebook(event.data.data);
         scheduleRead();
-      } else ingest(WakuX.extract(event.data.data));
+      } else {
+        syncProfile();
+        const items = WakuX.extract(event.data.data, active?.handle);
+        updateAccount(items.account);
+        ingest(items);
+      }
       return;
     }
     if (!frame || event.source !== frame.contentWindow || event.origin !== extensionOrigin) return;

@@ -23,7 +23,28 @@ function exclusiveScan(task) {
 function summary() {
   if (!job) return null;
   const count = status => job.items.filter(item => item.status === status).length;
-  return { id: job.id, handle: job.handle, platform: job.platform || "x", pathVersion: job.pathVersion || 1, folderCount: job.folderCount ?? null, total: job.items.length, done: count("complete"), failed: count("failed"), active: count("active"), queued: count("queued"), cancelled: count("cancelled"), status: job.status, skipped: job.skipped, errors: job.items.filter(item => item.status === "failed").slice(0, 3).map(item => item.error) };
+  return { id: job.id, handle: job.handle, platform: job.platform || "x", pathVersion: job.pathVersion || 1, folderCount: job.folderCount ?? null, total: job.items.length, done: count("complete"), failed: count("failed"), active: count("active"), queued: count("queued"), cancelled: count("cancelled"), status: job.status, skipped: job.skipped, sourceStatus: job.source?.status || null, sourceError: job.source?.error || "", errors: job.items.filter(item => item.status === "failed").slice(0, 3).map(item => item.error) };
+}
+function photoPath(item) {
+  const legacy = job.pathVersion !== 2;
+  const path = (item.platform === "facebook" ? WakuFacebook.filename(item, legacy) : WakuX.filename(item, legacy)).split("/");
+  if (Number.isInteger(job.folderCount) && job.folderCount > 0 && job.folderCount <= WakuX.LIMIT) path[legacy ? 1 : 2] += ` (${job.folderCount})`;
+  return path.join("/");
+}
+function sourceText(source, platform, handle) {
+  const id = platform === "facebook" && /^\d{1,25}$/.test(handle) ? handle : source.profileId;
+  const profileUrl = platform === "facebook"
+    ? id ? `https://www.facebook.com/profile.php?id=${id}` : `https://www.facebook.com/${handle}`
+    : id ? `https://x.com/i/user/${id}` : `https://x.com/${handle}`;
+  const lines = ["NGUỒN ẢNH", `Nền tảng: ${platform === "facebook" ? "Facebook" : "X"}`, `Tên: ${source.name}`, `Tài khoản: ${platform === "x" ? "@" : ""}${handle}`];
+  if (id) lines.push(`ID: ${id}`);
+  lines.push(`Link hồ sơ: ${profileUrl}`);
+  return "\uFEFF" + lines.join("\r\n") + "\r\n";
+}
+function settleSource(state, error) {
+  if (!job?.source) return;
+  if (state === "complete") { job.source.status = "complete"; job.source.error = ""; }
+  else if (state === "interrupted") { job.source.status = "failed"; job.source.error = error || "Tải bị gián đoạn."; }
 }
 async function save() {
   const keys = Object.keys(history);
@@ -48,6 +69,13 @@ async function reconcile() {
       else settle(item, download.state, download.error);
     } catch (error) { item.status = "failed"; item.error = error.message; }
   }
+  if (job.source?.status === "active") {
+    try {
+      const [download] = await chrome.downloads.search({ id: job.source.downloadId });
+      if (!download) { job.source.status = "failed"; job.source.error = "Không còn thông tin tệp nguồn."; }
+      else settleSource(download.state, download.error);
+    } catch (error) { job.source.status = "failed"; job.source.error = error.message; }
+  }
 }
 async function pump() {
   if (!job || job.status !== "running") return;
@@ -56,17 +84,23 @@ async function pump() {
     if (active >= 3) break;
     if (item.status !== "queued") continue;
     try {
-      const legacy = job.pathVersion !== 2;
-      const path = (item.photo.platform === "facebook" ? WakuFacebook.filename(item.photo, legacy) : WakuX.filename(item.photo, legacy)).split("/");
-      // Existing jobs and retries keep the directory assigned when they started.
-      if (Number.isInteger(job.folderCount) && job.folderCount > 0 && job.folderCount <= WakuX.LIMIT) path[legacy ? 1 : 2] += ` (${job.folderCount})`;
-      item.downloadId = await chrome.downloads.download({ url: item.photo.url, filename: path.join("/"), saveAs: false, conflictAction: "uniquify" });
+      item.downloadId = await chrome.downloads.download({ url: item.photo.url, filename: photoPath(item.photo), saveAs: false, conflictAction: "uniquify" });
       item.status = "active";
       active++;
     } catch (error) { item.status = "failed"; item.error = error.message; }
   }
-  if (!job.items.some(item => item.status === "queued" || item.status === "active")) {
-    job.status = job.items.some(item => item.status === "failed") ? "finished_with_errors" : "complete";
+  if (job.source?.status === "queued") {
+    try {
+      const folder = photoPath(job.items[0].photo).split("/").slice(0, -1).join("/");
+      const url = "data:text/plain;charset=utf-8," + encodeURIComponent(sourceText(job.source, job.platform, job.handle));
+      job.source.downloadId = await chrome.downloads.download({ url, filename: `${folder}/#nguon.txt`, saveAs: false, conflictAction: "uniquify" });
+      job.source.status = "active";
+      const [download] = await chrome.downloads.search({ id: job.source.downloadId });
+      if (download) settleSource(download.state, download.error);
+    } catch (error) { job.source.status = "failed"; job.source.error = error.message; }
+  }
+  if (!job.items.some(item => item.status === "queued" || item.status === "active") && !["queued", "active"].includes(job.source?.status)) {
+    job.status = job.items.some(item => item.status === "failed") || job.source?.status === "failed" ? "finished_with_errors" : "complete";
   }
   // Fill free slots first, then checkpoint all started IDs in one storage write.
   await save();
@@ -88,7 +122,9 @@ async function start(message) {
     if (message.skipSaved !== false && history[archiveKey(photo)]) { skipped++; continue; }
     items.push({ photo, status: "queued", downloadId: null });
   }
-  job = { id: crypto.randomUUID(), platform, handle, items, skipped, pathVersion: 2, folderCount: items.length, status: "running", createdAt: Date.now() };
+  const name = String(message.name || handle).replace(/[\u0000-\u001f\u007f]+/g, " ").trim().slice(0, 120) || handle;
+  const profileId = typeof message.profileId === "string" && /^\d{1,25}$/.test(message.profileId) ? message.profileId : null;
+  job = { id: crypto.randomUUID(), platform, handle, items, skipped, pathVersion: 2, folderCount: items.length, status: "running", createdAt: Date.now(), source: items.length ? { name, profileId, status: "queued", downloadId: null, error: "" } : null };
   await pump();
   return summary();
 }
@@ -117,7 +153,8 @@ async function scanMessage(message, sender) {
   const selected = (Array.isArray(raw.selected) ? raw.selected : []).slice(0, WakuX.LIMIT).filter(id => unique.has(id));
   let avatar = null;
   try { const url = new URL(raw.avatar); if (url.protocol === "https:" && url.hostname === "pbs.twimg.com" && url.pathname.startsWith("/profile_images/")) avatar = url.href; } catch {}
-  await chrome.storage.session.set({ [key]: { platform: isFacebook ? "facebook" : "x", handle, items: [...unique.values()], selected, selectNew: raw.selectNew !== false, name: String(raw.name || handle).slice(0, 80), avatar, scrollTop: Math.max(0, Math.min(1000000, Number(raw.scrollTop) || 0)) } });
+  const profileId = /^\d{1,25}$/.test(String(raw.profileId || "")) ? String(raw.profileId) : null;
+  await chrome.storage.session.set({ [key]: { platform: isFacebook ? "facebook" : "x", handle, profileId, items: [...unique.values()], selected, selectNew: raw.selectNew !== false, name: String(raw.name || handle).slice(0, 80), avatar, scrollTop: Math.max(0, Math.min(1000000, Number(raw.scrollTop) || 0)) } });
   return {};
 }
 chrome.runtime.onMessage.addListener((message, sender, reply) => {
@@ -147,6 +184,7 @@ chrome.runtime.onMessage.addListener((message, sender, reply) => {
     }
     if (message.type === "RETRY_DOWNLOAD" && job && job.status !== "running") {
       for (const item of job.items) if (item.status === "failed") { item.status = "queued"; item.error = ""; item.downloadId = null; }
+      if (job.source?.status === "failed") { job.source.status = "queued"; job.source.error = ""; job.source.downloadId = null; }
       job.status = "running";
     }
     await reconcile();
@@ -158,6 +196,11 @@ chrome.runtime.onMessage.addListener((message, sender, reply) => {
 chrome.downloads.onChanged.addListener(delta => {
   if (!delta.state) return;
   void exclusive(async () => {
+    if (job?.source?.downloadId === delta.id) {
+      settleSource(delta.state.current, delta.error?.current);
+      if (job.status === "running") await pump(); else await save();
+      return;
+    }
     const item = job?.items.find(item => item.downloadId === delta.id);
     if (!item) return;
     settle(item, delta.state.current, delta.error?.current);
