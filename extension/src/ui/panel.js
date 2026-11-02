@@ -169,7 +169,7 @@ function render() {
   $("empty").hidden = !!state.items.length;
   $("more").hidden = posts.length <= visible;
   renderRows(posts, selected);
-  if (!restoredScroll && !state.restoring) {
+  if (!restoredScroll && !state.restoring && document.documentElement.clientHeight > 0) {
     $("list").scrollTop = state.scrollTop || 0;
     // Larger lists may need more rows to restore their saved scroll position.
     if (state.scrollTop > $("list").scrollTop + 100 && posts.length > visible) {

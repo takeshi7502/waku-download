@@ -14,9 +14,9 @@ Nếu cài trực tiếp từ mã nguồn, chọn thư mục **`extension`** bê
 ## Sử dụng
 
 1. Đăng nhập nền tảng, mở profile cần tải; trên X hoặc Facebook chọn tab **Ảnh / Media**, trên Pixiv mở trang tác phẩm của tác giả.
-2. Bấm biểu tượng **Waku Download**. Bảng ở bên phải tự thêm ảnh khi bạn cuộn trang.
+2. Bấm biểu tượng **Waku Download** trên trang để mở bảng. Bảng tự thêm ảnh khi bạn cuộn trang.
 3. Chọn ảnh, bài đăng hoặc tất cả, rồi bấm **Tải ảnh đã chọn**. Tiến trình, nút dừng và thử lại được giữ ở đáy bảng.
-4. Bấm **»** để thu gọn; bấm nút **↓** ở góc trên để mở lại. Có thể chuyển tab hoặc thu gọn trong khi tải.
+4. Bấm **»** để thu gọn; bấm logo Waku để mở lại. Kéo logo sang trái hoặc phải, rồi thả để ghim vào mép gần nhất. Vị trí được ghi nhớ. Có thể chuyển tab hoặc thu gọn trong khi tải; khi mở lại trang, bảng khởi đầu ở dạng thu gọn.
 
 Các lượt tải mới nằm trong thư mục Downloads mặc định của trình duyệt:
 

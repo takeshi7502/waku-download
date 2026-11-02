@@ -149,7 +149,7 @@ test("isolates saved collections by tab/profile and restores selected images wit
   assert.equal(second.state.items[0].id, "b");
   await h.sendFrom({ type: "PANEL_COLLAPSED", collapsed: true }, tab(1));
   assert.equal((await h.sendFrom({ type: "PANEL_INIT" }, tab(1))).collapsed, true);
-  assert.equal((await h.sendFrom({ type: "PANEL_INIT" }, tab(2))).collapsed, false);
+  assert.equal((await h.sendFrom({ type: "PANEL_INIT" }, tab(2))).collapsed, true);
   const restored = await harness(h.store, { session: h.session });
   assert.equal((await restored.sendFrom({ type: "LOAD_SCAN", handle: "example" }, tab(1))).state.items[0].id, "a");
   assert.equal(await h.sendFrom({ type: "LOAD_SCAN", handle: "example" }, { url: "https://evil.com/", tab: { id: 1 } }), null);

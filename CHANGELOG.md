@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.2.2
+
+- Mở X, Facebook và Pixiv với nút logo thu gọn; bấm nút để mở bảng.
+- Thu nhỏ nút và cho phép kéo ghim vào mép trái hoặc phải, ghi nhớ vị trí giữa các tab.
+
 ## 1.2.1
 
 - Sửa tải ảnh gốc Pixiv khi máy chủ yêu cầu Referer.

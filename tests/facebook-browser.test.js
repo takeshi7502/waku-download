@@ -101,6 +101,7 @@ test("Facebook profile photos: passive capture, signed full-size URL, selection 
     await page.waitForTimeout(500);
     await page.reload();
     panel = page.frameLocator("#waku-panel iframe");
+    await page.locator("#waku-launcher").click();
     await panel.locator("#image-count").filter({ hasText: "2 ảnh" }).waitFor();
     await panel.locator("#job-count").filter({ hasText: "0/1" }).waitFor();
     assert.equal(await panel.getByLabel("Chọn ảnh 501", { exact: true }).isChecked(), false);

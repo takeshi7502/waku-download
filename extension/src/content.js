@@ -1,6 +1,6 @@
 (() => {
   "use strict";
-  const CONTENT_VERSION = "1.2.1";
+  const CONTENT_VERSION = "1.2.2";
   const isFacebook = WakuFacebook.isFacebook(location.href);
   const isPixiv = location.hostname === "www.pixiv.net";
   const platform = isPixiv ? "pixiv" : isFacebook ? "facebook" : "x";
@@ -16,7 +16,10 @@
   let active = null;
   let host, frame, launcher;
   let enabled = false;
-  let collapsed = false;
+  let collapsed = true;
+  let panelInteracted = false;
+  let positionRevision = 0;
+  let launcherPosition = { side: "right", top: 16 };
   let panelReady = false;
   let scanTimer, publishTimer;
   let lastPath = "";
@@ -334,6 +337,7 @@
   }
   function setCollapsed(value) {
     if (!contextReady()) return;
+    panelInteracted = true;
     collapsed = value;
     if (!host) return;
     host.classList.toggle("collapsed", value);
@@ -342,6 +346,51 @@
     void send({ type: "PANEL_COLLAPSED", collapsed: value }).catch(() => {});
     if (!value) publish();
   }
+  function applyLauncherPosition(position) {
+    launcherPosition = { side: position?.side === "left" ? "left" : "right", top: Number.isFinite(Number(position?.top)) ? Math.max(0, Number(position.top)) : 16 };
+    if (!host) return;
+    host.classList.toggle("left", launcherPosition.side === "left");
+    host.style.setProperty("--waku-top", `${Math.min(launcherPosition.top, Math.max(0, window.innerHeight - 38))}px`);
+  }
+  function setupLauncherDrag() {
+    let drag = null;
+    let suppressClick = false;
+    launcher.addEventListener("pointerdown", event => {
+      if (event.button !== 0) return;
+      const rect = host.getBoundingClientRect();
+      drag = { id: event.pointerId, startX: event.clientX, startY: event.clientY, x: rect.left, y: rect.top, moved: false };
+      launcher.setPointerCapture(event.pointerId);
+    }, { signal: lifecycle.signal });
+    launcher.addEventListener("pointermove", event => {
+      if (!drag || event.pointerId !== drag.id) return;
+      const dx = event.clientX - drag.startX, dy = event.clientY - drag.startY;
+      if (!drag.moved && Math.hypot(dx, dy) < 5) return;
+      drag.moved = true;
+      host.classList.add("dragging");
+      host.style.setProperty("--waku-drag-x", `${Math.max(0, Math.min(window.innerWidth - 38, drag.x + dx))}px`);
+      host.style.setProperty("--waku-top", `${Math.max(0, Math.min(window.innerHeight - 38, drag.y + dy))}px`);
+    }, { signal: lifecycle.signal });
+    const finish = event => {
+      if (!drag || event.pointerId !== drag.id) return;
+      if (drag.moved) {
+        const rect = host.getBoundingClientRect();
+        const position = { side: rect.left + rect.width / 2 < window.innerWidth / 2 ? "left" : "right", top: rect.top };
+        suppressClick = event.type === "pointerup";
+        if (suppressClick) setTimeout(() => { suppressClick = false; }, 0);
+        positionRevision++;
+        host.classList.remove("dragging");
+        applyLauncherPosition(position);
+        void send({ type: "PANEL_POSITION", position }).catch(() => {});
+      }
+      drag = null;
+    };
+    launcher.addEventListener("pointerup", finish, { signal: lifecycle.signal });
+    launcher.addEventListener("pointercancel", finish, { signal: lifecycle.signal });
+    launcher.addEventListener("click", event => {
+      if (suppressClick) { suppressClick = false; event.preventDefault(); return; }
+      setCollapsed(false);
+    }, { signal: lifecycle.signal });
+  }
   function mount() {
     if (!contextReady() || !enabled || !document.documentElement || host?.isConnected) return;
     host = document.createElement("div");
@@ -349,18 +398,19 @@
     host.dataset.wakuVersion = CONTENT_VERSION;
     const root = host.attachShadow({ mode: "open" });
     const style = document.createElement("style");
-    style.textContent = `:host{all:initial!important;position:fixed!important;right:12px!important;top:16px!important;bottom:16px!important;width:min(380px,calc(100vw - 24px))!important;z-index:2147483646!important;display:block!important;color-scheme:dark!important}:host(.collapsed){top:16px!important;bottom:auto!important;width:48px!important;height:48px!important}iframe{border:0!important;width:100%!important;height:100%!important;display:block;border-radius:12px;box-shadow:0 8px 38px #0004;background:#111318}button{all:initial;box-sizing:border-box;display:grid;place-items:center;width:48px;height:48px;border:1px solid #aab2ff;border-radius:15px;background:linear-gradient(135deg,#5264ff,#8565ff);box-shadow:0 4px 20px #0004;color:white;cursor:pointer;font:700 17px system-ui}button:hover{filter:brightness(1.1)}button:focus-visible{outline:3px solid #a5afff;outline-offset:3px}[hidden]{display:none!important}`;
+    style.textContent = `:host{all:initial!important;position:fixed!important;right:12px!important;top:16px!important;bottom:16px!important;width:min(380px,calc(100vw - 24px))!important;z-index:2147483646!important;display:block!important;color-scheme:dark!important}:host(.left){left:12px!important;right:auto!important}:host(.collapsed){right:4px!important;top:var(--waku-top,16px)!important;bottom:auto!important;width:38px!important;height:38px!important}:host(.collapsed.left){left:4px!important;right:auto!important}:host(.collapsed.dragging){left:var(--waku-drag-x)!important;right:auto!important}iframe{border:0!important;width:100%!important;height:100%!important;display:block;border-radius:12px;box-shadow:0 8px 38px #0004;background:#111318}button{all:initial;box-sizing:border-box;display:grid;place-items:center;width:38px;height:38px;border-radius:10px;box-shadow:0 4px 20px #0006;color:white;cursor:grab;touch-action:none;user-select:none}button:active{cursor:grabbing}button:hover{filter:brightness(1.15)}button:focus-visible{outline:3px solid #a5afff;outline-offset:3px}button svg{width:100%;height:100%;display:block}[hidden]{display:none!important}`;
     frame = document.createElement("iframe");
     frame.title = "Waku Download — bảng tải ảnh";
     frame.src = `${extensionBase}panel.html#${encodeURIComponent(location.origin)}`;
     launcher = document.createElement("button");
     launcher.id = "waku-launcher";
-    launcher.textContent = "↓";
-    launcher.title = `Mở lại Waku Download ${CONTENT_VERSION}`;
+    launcher.innerHTML = '<svg viewBox="0 0 128 128" aria-hidden="true"><rect x="2" y="2" width="124" height="124" rx="29" fill="#24243b" stroke="#5c5481" stroke-width="4"/><path d="M17 37 26 90 41 59 55 90 65 37M94 37v51M82 75l12 14 12-14" fill="none" stroke="#c5bfff" stroke-width="8" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+    launcher.title = `Mở Waku Download ${CONTENT_VERSION} · Kéo để chuyển vị trí`;
     launcher.setAttribute("aria-label", "Mở lại bảng tải ảnh");
-    launcher.addEventListener("click", () => setCollapsed(false), { signal: lifecycle.signal });
+    setupLauncherDrag();
     root.append(style, frame, launcher);
     document.documentElement.append(host);
+    applyLauncherPosition(launcherPosition);
     host.classList.toggle("collapsed", collapsed);
     frame.hidden = collapsed;
     launcher.hidden = !collapsed;
@@ -426,6 +476,7 @@
   observer.observe(document, { childList: true, subtree: true, attributes: true, attributeFilter: ["src", "srcset", "href"] });
   window.addEventListener("scroll", scheduleRead, { passive: true, capture: true, signal: lifecycle.signal });
   window.addEventListener("popstate", scheduleRead, { signal: lifecycle.signal });
+  window.addEventListener("resize", () => applyLauncherPosition(launcherPosition), { signal: lifecycle.signal });
   document.addEventListener("visibilitychange", () => { if (!document.hidden) { scheduleRead(); publish(); } }, { signal: lifecycle.signal });
   window.addEventListener("pagehide", () => {
     for (const collection of collections.values()) {
@@ -441,13 +492,15 @@
   if (!registerChromeListener(() => chrome.storage.onChanged, (changes, area) => {
     if (!contextReady()) return;
     if (area === "local" && changes.panelEnabled?.newValue) { enabled = true; mount(); }
+    if (area === "local" && changes.launcherPosition?.newValue) applyLauncherPosition(changes.launcherPosition.newValue);
   })) return;
   syncProfile();
   scheduleRead();
   void send({ type: "PANEL_INIT" }).then(result => {
     if (!contextReady()) return;
     enabled ||= !!result?.enabled;
-    collapsed = !!result?.collapsed;
+    if (!panelInteracted) collapsed = true;
+    if (!positionRevision && result?.position) applyLauncherPosition(result.position);
     mount();
     window.postMessage({ type: "WAKU_READ_CACHE" }, location.origin);
   }).catch(() => {});

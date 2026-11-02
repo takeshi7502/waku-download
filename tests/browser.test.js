@@ -54,6 +54,63 @@ async function waitFor(read, predicate, message) {
   assert.fail(message);
 }
 
+test("launcher starts collapsed, snaps to an edge and remembers its position across sites", { timeout: 60000 }, async () => {
+  const userData = await mkdtemp(path.join(tmpdir(), "waku-launcher-test-"));
+  let context;
+  try {
+    context = await chromium.launchPersistentContext(userData, { executablePath: await browserPath(), headless: true, viewport: { width: 1200, height: 800 }, args: [`--disable-extensions-except=${extension}`, `--load-extension=${extension}`] });
+    const worker = context.serviceWorkers()[0] || await context.waitForEvent("serviceworker");
+    for (const origin of ["https://x.com/**", "https://web.facebook.com/**", "https://www.pixiv.net/**"]) {
+      await context.route(origin, route => route.fulfill({ contentType: "text/html", body: "<main><h1>Profile</h1></main>" }));
+    }
+    const page = await context.newPage();
+    await page.goto("https://x.com/example/media");
+    const button = page.locator("#waku-launcher");
+    await button.waitFor({ state: "visible" });
+    assert.equal(await page.locator("#waku-panel iframe").isVisible(), false);
+    assert.equal(await button.locator("svg").count(), 1);
+    let box = await button.boundingBox();
+    assert.equal(box.width, 38);
+    assert.equal(box.x + box.width, 1196);
+    await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+    await page.mouse.down();
+    await page.mouse.move(200, 230, { steps: 8 });
+    await page.mouse.up();
+    box = await button.boundingBox();
+    assert.equal(box.x, 4, "dragging left must snap to the left edge");
+    assert.equal(await button.isVisible(), true, "dragging must not open the panel");
+    assert.ok(box.y > 150 && box.y < 250);
+    const savedTop = box.y;
+    await waitFor(() => worker.evaluate(() => chrome.storage.local.get("launcherPosition")), value => value.launcherPosition?.side === "left", "launcher position should be saved");
+    await button.click();
+    await page.frameLocator("#waku-panel iframe").locator("header").waitFor();
+    assert.equal((await page.locator("#waku-panel").boundingBox()).x, 12, "expanded panel should follow the launcher side");
+    await page.reload();
+    await button.waitFor({ state: "visible" });
+    box = await button.boundingBox();
+    assert.equal(box.x, 4);
+    assert.equal(box.y, savedTop);
+    for (const url of ["https://web.facebook.com/profile.php?id=42&sk=photos", "https://www.pixiv.net/en/users/42"]) {
+      const tab = await context.newPage(); await tab.goto(url);
+      const icon = tab.locator("#waku-launcher"); await icon.waitFor({ state: "visible" });
+      assert.equal((await icon.boundingBox()).x, 4);
+      assert.equal(await tab.locator("#waku-panel iframe").isVisible(), false);
+      await tab.close();
+    }
+    await page.bringToFront();
+    box = await button.boundingBox();
+    await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+    await page.mouse.down(); await page.mouse.move(950, 300, { steps: 8 }); await page.mouse.up();
+    box = await button.boundingBox();
+    assert.equal(box.x + box.width, 1196, "dragging right must snap to the right edge");
+    assert.equal(await button.isVisible(), true);
+  } finally {
+    await context?.close();
+    const expected = path.resolve(tmpdir()) + path.sep;
+    if (path.resolve(userData).startsWith(expected) && path.basename(userData).startsWith("waku-launcher-test-")) await rm(userData, { recursive: true, force: true });
+  }
+});
+
 test("docked panel: passive capture, collapse, tab switching, persisted selection and fixed download progress", { timeout: 90000 }, async () => {
   const userData = await mkdtemp(path.join(tmpdir(), "waku-test-"));
   let context;
@@ -107,7 +164,7 @@ test("docked panel: passive capture, collapse, tab switching, persisted selectio
     await send({ type: "OPEN_PANEL" });
     let panel = page.frameLocator("#waku-panel iframe");
     await panel.locator("#image-count").filter({ hasText: "5 ảnh" }).waitFor();
-    assert.equal(await page.locator("#waku-panel").getAttribute("data-waku-version"), "1.2.1");
+    assert.equal(await page.locator("#waku-panel").getAttribute("data-waku-version"), "1.2.2");
     assert.equal(await panel.locator(".photo").count(), 5);
     await panel.getByLabel("Chọn ảnh second", { exact: true }).uncheck();
     await waitFor(status, value => value.selected.length === 4, "selection should update in the content state");
@@ -119,7 +176,7 @@ test("docked panel: passive capture, collapse, tab switching, persisted selectio
     await page.locator("#waku-launcher").waitFor({ state: "visible" });
     const launcherBox = await page.locator("#waku-launcher").boundingBox();
     assert.equal(launcherBox.y, 16, "collapsed launcher must be at the top of the viewport");
-    assert.equal(launcherBox.x + launcherBox.width, 1440 - 12, "collapsed launcher must stay at the right edge");
+    assert.equal(launcherBox.x + launcherBox.width, 1440 - 4, "collapsed launcher must stay at the right edge");
     await page.evaluate(() => scrollTo(0, 800));
     await waitFor(status, value => value.items.length === 7, "manual scrolling should capture all newly loaded photos while collapsed");
     await page.locator("#waku-launcher").click();
@@ -168,6 +225,7 @@ test("docked panel: passive capture, collapse, tab switching, persisted selectio
     const other = await context.newPage();
     await other.goto("https://x.com/other/media");
     const otherPanel = other.frameLocator("#waku-panel iframe");
+    await other.locator("#waku-launcher").click();
     await otherPanel.locator("#job-title").filter({ hasText: "Đang tải" }).waitFor();
     await page.bringToFront();
     assert.equal(await panel.locator("#job-count").textContent(), "0/33");
@@ -176,6 +234,7 @@ test("docked panel: passive capture, collapse, tab switching, persisted selectio
     await page.waitForTimeout(500);
     await page.reload();
     panel = page.frameLocator("#waku-panel iframe");
+    await page.locator("#waku-launcher").click();
     await panel.locator("#image-count").filter({ hasText: "34 ảnh" }).waitFor();
     await panel.locator("#job-title").filter({ hasText: "Đang tải" }).waitFor();
     assert.equal(await panel.getByLabel("Chọn ảnh second", { exact: true }).isChecked(), false, "reload should restore deselected images");

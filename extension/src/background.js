@@ -144,12 +144,17 @@ async function start(message) {
   await pump();
   return summary();
 }
-const scanMessages = new Set(["LOAD_SCAN", "SAVE_SCAN", "PANEL_INIT", "PANEL_COLLAPSED"]);
+const scanMessages = new Set(["LOAD_SCAN", "SAVE_SCAN", "PANEL_INIT", "PANEL_COLLAPSED", "PANEL_POSITION"]);
 async function scanMessage(message, sender) {
   const tabId = sender.tab.id;
   if (message.type === "PANEL_INIT") {
-    const [settings, ui] = await Promise.all([chrome.storage.local.get("panelEnabled"), chrome.storage.session.get(`panel:${tabId}`)]);
-    return { enabled: !!settings.panelEnabled, collapsed: !!ui[`panel:${tabId}`]?.collapsed };
+    const settings = await chrome.storage.local.get("launcherPosition");
+    return { enabled: true, collapsed: true, position: settings.launcherPosition || null };
+  }
+  if (message.type === "PANEL_POSITION") {
+    const position = { side: message.position?.side === "left" ? "left" : "right", top: Math.max(0, Math.min(100000, Number(message.position?.top) || 0)) };
+    await chrome.storage.local.set({ launcherPosition: position });
+    return {};
   }
   if (message.type === "PANEL_COLLAPSED") {
     await chrome.storage.session.set({ [`panel:${tabId}`]: { collapsed: !!message.collapsed } });
