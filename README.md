@@ -1,6 +1,6 @@
 # Waku Download
 
-Tiện ích Chrome và Microsoft Edge giúp gom và tải hàng loạt ảnh trên profile **X**, **Facebook** và **Pixiv**. Cuộn trang để nhận thêm ảnh, chọn ảnh cần lưu rồi theo dõi tiến trình trong bảng bên phải.
+Tiện ích Chrome và Microsoft Edge giúp gom và tải hàng loạt ảnh và video trên profile **X**, **Facebook** và **Pixiv**. Cuộn trang để nhận thêm nội dung, chọn ảnh hoặc video cần lưu rồi theo dõi tiến trình trong bảng bên phải.
 
 ## Giấy phép và credit
 
@@ -21,7 +21,7 @@ Nếu cài trực tiếp từ mã nguồn, chọn thư mục **`extension`** bê
 
 1. Đăng nhập nền tảng, mở profile cần tải; trên X hoặc Facebook chọn tab **Ảnh / Media**, trên Pixiv mở trang tác phẩm của tác giả.
 2. Bấm biểu tượng **Waku Download** trên trang để mở bảng. Bảng tự thêm ảnh khi bạn cuộn trang.
-3. Chọn ảnh, bài đăng hoặc tất cả, rồi bấm **Tải ảnh đã chọn**. Tiến trình, nút tạm dừng, dừng và thử lại được giữ ở đáy bảng.
+3. Tích **Ảnh**, **Video** hoặc cả hai, chọn nội dung muốn lưu rồi bấm **Tải mục đã chọn**. Loại chưa có trong danh sách sẽ không được tích. Tiến trình, nút tạm dừng, dừng và thử lại được giữ ở đáy bảng.
 4. Bấm **»** để thu gọn; bấm logo Waku để mở lại. Kéo logo sang trái hoặc phải, rồi thả để ghim vào mép gần nhất. Vị trí được ghi nhớ. Có thể chuyển tab hoặc thu gọn trong khi tải; khi mở lại trang, bảng khởi đầu ở dạng thu gọn.
 
 Các lượt tải mới nằm trong thư mục Downloads mặc định của trình duyệt:
@@ -47,9 +47,9 @@ Mỗi lượt tải còn có một file `#nguon.txt` trong cùng thư mục, ghi
 ## Phạm vi và chất lượng ảnh
 
 - Tiện ích gom ảnh mà tài khoản đang đăng nhập có thể xem và trang đã tải. Mỗi profile tối đa 5.000 ảnh trong danh sách; tiện ích không tự cuộn hay gửi yêu cầu tải thêm bài.
-- Trên X, tiện ích yêu cầu ảnh kích thước `orig` và nhận các ảnh trong một bài khi dữ liệu có sẵn. Video không được tải.
-- Trên Facebook, chỉ ảnh có liên kết ảnh xuất hiện trong tab Ảnh của profile được đưa vào danh sách. Tiện ích chọn ảnh lớn nhất có sẵn trong dữ liệu trang; nếu Facebook chỉ cung cấp ảnh thu nhỏ, file tải có thể là ảnh thu nhỏ. URL ảnh Facebook có thể hết hạn; tải lại trang và cuộn lại nếu cần lấy URL mới.
-- Trên Pixiv, tiện ích hỏi Pixiv thông tin của các tác phẩm xuất hiện trên profile hoặc tác phẩm đang mở và lấy URL `original` cho từng trang, kể cả tác phẩm nhiều ảnh. Khi mở trang tác phẩm, bảng chỉ hiện ảnh của tác phẩm đó; trở về profile sẽ hiện lại danh sách đã gom. Ảnh chỉ xuất hiện khi Pixiv trả về ảnh gốc; tải lại trang để thử lại nếu không lấy được dữ liệu. Ugoira (ảnh động) không được tải. Nội dung bị giới hạn cần tài khoản có quyền xem.
+- Trên X, tiện ích yêu cầu ảnh kích thước `orig` và chọn bản MP4 có bitrate cao nhất trong dữ liệu video. Nếu timeline không cung cấp video, tiện ích thử dịch vụ nhúng công khai của X (`cdn.syndication.twimg.com`), sau đó dùng FxTwitter (`api.fxtwitter.com`) nếu cần. FxTwitter nhận username, ID bài công khai và địa chỉ IP, nhưng không nhận cookie hay mật khẩu. Bài riêng tư có thể không dùng được cách này. Luồng HLS riêng lẻ chưa được hỗ trợ.
+- Trên Facebook, tiện ích nhận ảnh và video khi trang cung cấp URL tải trực tiếp hoặc các luồng DASH MP4 tương thích. Khi chuyển sang Reel khác trong cùng tab, bảng tự tìm nội dung của Reel mới; nếu không có dữ liệu tải sẵn, tiện ích yêu cầu trang thông tin của đúng Reel đó từ Facebook bằng phiên đăng nhập hiện tại. Nếu chưa nhận được, có thể bấm **Tìm lại video**. Với DASH, tiện ích tải và ghép hình H.264 cùng tiếng AAC trên máy; một số video bị giới hạn, chỉ cung cấp HLS hoặc định dạng khác vẫn chưa tải được. Nếu dữ liệu không có track tiếng, bảng báo “không thấy tiếng”. Ảnh dùng bản lớn nhất có trong dữ liệu trang và có thể là ảnh thu nhỏ. URL có thể hết hạn; tải lại trang và cuộn lại để lấy URL mới.
+- Trên Pixiv, tiện ích lấy URL `original` cho từng trang ảnh, kể cả tác phẩm nhiều ảnh. Với Ugoira, tiện ích tải các khung hình Pixiv cung cấp và mã hóa thành video WebM trên máy, không có âm thanh; đây là bản chuyển mã, không phải video gốc không mất dữ liệu. Ugoira quá lớn có thể vượt giới hạn bộ nhớ hoặc thời lượng xử lý. Khi mở trang tác phẩm, bảng chỉ hiện nội dung của tác phẩm đó. Nội dung bị giới hạn cần tài khoản có quyền xem.
 - Danh sách, lựa chọn và vị trí cuộn được giữ theo tab/profile trong phiên trình duyệt. Lịch sử tải thành công và hàng đợi tải được lưu cục bộ; lịch sử không kiểm tra lại file nếu bạn đã di chuyển hoặc xóa file đó.
 - Tiện ích không yêu cầu mật khẩu, không xuất cookie và không gửi dữ liệu tới máy chủ riêng. Để Pixiv cho phép tải ảnh gốc, tiện ích đặt Referer của các yêu cầu đến `i.pximg.net` thành địa chỉ Pixiv và dùng tài liệu chạy nền để chuyển ảnh vào trình quản lý tải. Khi cấu trúc các trang thay đổi, phần nhận ảnh có thể cần cập nhật.
 

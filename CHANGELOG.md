@@ -1,5 +1,41 @@
 # Changelog
 
+## 1.4.6
+
+- Dùng FxTwitter dự phòng khi nguồn nhúng X không cung cấp video công khai.
+
+## 1.4.5
+
+- Nhận video X từ ảnh xem trước trên lưới media và bổ sung các dạng dữ liệu video.
+- Giảm tính lại bố cục khi gắn nút tiện ích trên trang X.
+
+## 1.4.4
+
+- Khi chuyển Reel Facebook mà dữ liệu chưa được tải sẵn, tự tìm dữ liệu của đúng Reel hiện tại bằng phiên đăng nhập trên Facebook.
+- Hủy yêu cầu cũ khi chuyển nhanh giữa các Reel và thêm nút tìm lại nếu Facebook không trả về video.
+
+## 1.4.3
+
+- Nhận Reel Facebook tiếp theo khi chuyển video trong cùng tab, kể cả dữ liệu đã được tải sẵn trước khi chuyển.
+- Giữ lựa chọn theo từng tác giả và hiển thị đúng loại video trong danh sách.
+
+## 1.4.2
+
+- Nhận video X khi dữ liệu media thiếu ID hoặc khi bài video xuất hiện trên trang nhưng timeline không cung cấp video trực tiếp.
+- Dùng dữ liệu Pixiv mà trang đã tải, gửi đúng phiên đăng nhập khi lấy Ugoira và thông báo rõ hơn khi tác phẩm giới hạn.
+- Kiểm tra lại việc tải Reel Facebook, video X và Ugoira công khai trong trình duyệt.
+
+## 1.4.1
+
+- Cải thiện nhận video Facebook Reel, bao gồm dữ liệu phát mới và các luồng DASH MP4 có hình và tiếng riêng.
+- Ghép các luồng tương thích thành MP4 trên máy; báo rõ khi không thấy track tiếng.
+
+## 1.4.0
+
+- Thêm bộ chọn ảnh và video; có thể tải riêng hoặc tải cả hai trong một lượt.
+- Tải video MP4 sẵn có trên X và Facebook, ưu tiên chất lượng cao nhất mà trang cung cấp.
+- Hỗ trợ chuyển Ugoira Pixiv thành WebM trực tiếp trên máy.
+
 ## 1.3.0
 
 - Tạm dừng và tiếp tục hàng đợi; các ảnh đã bắt đầu vẫn tải xong.

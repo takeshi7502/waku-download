@@ -29,8 +29,8 @@ function summary() {
 }
 function errorDetail(error, platform) {
   const raw = String(error || "");
-  if (/SERVER_FORBIDDEN|HTTP\s*(401|403)/i.test(raw)) return platform === "facebook" ? "Facebook từ chối truy cập hoặc link ảnh đã hết hạn. Tải lại trang và cuộn lại." : platform === "pixiv" ? "Pixiv từ chối truy cập ảnh. Kiểm tra quyền xem rồi tải lại trang." : "Máy chủ từ chối truy cập ảnh. Tải lại trang rồi thử lại.";
-  if (/SERVER_BAD_CONTENT|SERVER_NO_RANGE|HTTP\s*404/i.test(raw)) return "Không tìm thấy ảnh hoặc link ảnh không còn hiệu lực. Tải lại trang rồi thử lại.";
+  if (/SERVER_FORBIDDEN|HTTP\s*(401|403)/i.test(raw)) return platform === "facebook" ? "Facebook từ chối truy cập hoặc link đã hết hạn. Tải lại trang và cuộn lại." : platform === "pixiv" ? "Pixiv từ chối truy cập. Kiểm tra quyền xem rồi tải lại trang." : "Máy chủ từ chối truy cập. Tải lại trang rồi thử lại.";
+  if (/SERVER_BAD_CONTENT|SERVER_NO_RANGE|HTTP\s*404/i.test(raw)) return "Không tìm thấy nội dung hoặc link không còn hiệu lực. Tải lại trang rồi thử lại.";
   if (/NETWORK|SERVER_UNREACHABLE|FAILED TO FETCH|LOAD FAILED|TIMEOUT|TIMED OUT/i.test(raw)) return "Không kết nối được tới máy chủ. Kiểm tra mạng rồi thử lại.";
   if (/HTTP\s*429|SERVER_TOO_MANY_REQUESTS/i.test(raw)) return "Máy chủ đang giới hạn lượt tải. Đợi một lúc rồi thử lại.";
   if (/HTTP\s*5\d\d|SERVER_FAILED/i.test(raw)) return "Máy chủ tạm thời gặp lỗi. Hãy thử lại sau.";
@@ -52,7 +52,7 @@ function sourceText(source, platform, handle) {
   const profileUrl = platform === "pixiv" ? `https://www.pixiv.net/users/${handle}` : platform === "facebook"
     ? id ? `https://www.facebook.com/profile.php?id=${id}` : `https://www.facebook.com/${handle}`
     : id ? `https://x.com/i/user/${id}` : `https://x.com/${handle}`;
-  const lines = ["NGUỒN ẢNH", `Nền tảng: ${platform === "pixiv" ? "Pixiv" : platform === "facebook" ? "Facebook" : "X"}`, `Tên: ${source.name}`, `Tài khoản: ${platform === "x" ? "@" : ""}${handle}`];
+  const lines = ["NGUỒN ẢNH / VIDEO", `Nền tảng: ${platform === "pixiv" ? "Pixiv" : platform === "facebook" ? "Facebook" : "X"}`, `Tên: ${source.name}`, `Tài khoản: ${platform === "x" ? "@" : ""}${handle}`];
   if (id) lines.push(`ID: ${id}`);
   lines.push(`Link hồ sơ: ${profileUrl}`);
   return "\uFEFF" + lines.join("\r\n") + "\r\n";
@@ -86,14 +86,24 @@ function settle(item, state, error) {
     } else item.status = "failed";
   }
 }
-async function pixivBlob(url) {
+async function pixivBlob(url, photo) {
   if (!offscreenCreation) offscreenCreation = (async () => {
     const exists = chrome.offscreen.hasDocument ? await chrome.offscreen.hasDocument() : (await clients.matchAll()).some(client => client.url === chrome.runtime.getURL("offscreen.html"));
     if (!exists) await chrome.offscreen.createDocument({ url: "offscreen.html", reasons: ["BLOBS"], justification: "Tải ảnh gốc Pixiv và cung cấp dữ liệu cho trình quản lý tải." });
   })().finally(() => { offscreenCreation = null; });
   await offscreenCreation;
-  const result = await chrome.runtime.sendMessage({ target: "pixiv-offscreen", type: "FETCH", url });
+  const result = await chrome.runtime.sendMessage({ target: "pixiv-offscreen", type: "FETCH", url, kind: photo?.kind, frames: photo?.frames });
   if (!result?.ok) throw new Error(result?.error || "Không thể lấy ảnh gốc Pixiv.");
+  return result.url;
+}
+async function facebookBlob(photo) {
+  if (!offscreenCreation) offscreenCreation = (async () => {
+    const exists = chrome.offscreen.hasDocument ? await chrome.offscreen.hasDocument() : (await clients.matchAll()).some(client => client.url === chrome.runtime.getURL("offscreen.html"));
+    if (!exists) await chrome.offscreen.createDocument({ url: "offscreen.html", reasons: ["BLOBS"], justification: "Ghép video Facebook trên máy và cung cấp dữ liệu cho trình quản lý tải." });
+  })().finally(() => { offscreenCreation = null; });
+  await offscreenCreation;
+  const result = await chrome.runtime.sendMessage({ target: "pixiv-offscreen", type: "FETCH_FACEBOOK_DASH", url: photo.url, audioUrl: photo.audioUrl });
+  if (!result?.ok) throw new Error(result?.error || "Không thể tải video Facebook.");
   return result.url;
 }
 async function reconcile() {
@@ -118,7 +128,7 @@ function revokeBlob(url) {
 }
 async function beginPixiv(item, jobId) {
   try {
-    const url = await pixivBlob(item.photo.url);
+    const url = item.photo.platform === "facebook" ? await facebookBlob(item.photo) : await pixivBlob(item.photo.url, item.photo);
     await exclusive(async () => {
       if (job?.id !== jobId || item.status !== "preparing") { revokeBlob(url); return; }
       item.blobUrl = url;
@@ -145,7 +155,7 @@ async function pump() {
     if (active >= 3) break;
     if (item.status !== "queued") continue;
     try {
-      if (item.photo.platform === "pixiv") { item.status = "preparing"; prepare.push(item); }
+      if (item.photo.platform === "pixiv" || (item.photo.platform === "facebook" && item.photo.videoMode === "dash")) { item.status = "preparing"; prepare.push(item); }
       else { item.downloadId = await chrome.downloads.download({ url: item.photo.url, filename: photoPath(item.photo), saveAs: false, conflictAction: "uniquify" }); item.status = "active"; }
       active++;
     } catch (error) { settle(item, "interrupted", error.message); }
@@ -173,13 +183,13 @@ async function start(message) {
   if (["running", "paused"].includes(job?.status)) throw new Error("Đang có một lượt tải. Dừng hoặc đợi tải xong trước.");
   const platform = message.platform === "pixiv" ? "pixiv" : message.platform === "facebook" ? "facebook" : "x";
   const handle = platform === "pixiv" ? WakuPixiv.handle(message.handle) : platform === "facebook" ? WakuFacebook.handle(message.handle) : WakuX.profile(message.handle);
-  if (!handle || !Array.isArray(message.items)) throw new Error("Danh sách ảnh không hợp lệ.");
+  if (!handle || !Array.isArray(message.items)) throw new Error("Danh sách tải không hợp lệ.");
   const unique = new Map();
   for (const raw of message.items.slice(0, WakuX.LIMIT)) {
     const item = platform === "pixiv" ? WakuPixiv.normalize(raw, handle) : platform === "facebook" ? WakuFacebook.normalize(raw, handle) : WakuX.normalize(raw, handle);
     if (item) unique.set(item.id, item);
   }
-  if (!unique.size) throw new Error("Chưa chọn ảnh để tải.");
+  if (!unique.size) throw new Error("Chưa chọn nội dung để tải.");
   let skipped = 0;
   const items = [];
   for (const photo of unique.values()) {
@@ -228,6 +238,25 @@ async function scanMessage(message, sender) {
   return {};
 }
 chrome.runtime.onMessage.addListener((message, sender, reply) => {
+  if (message.type === "RESOLVE_X_VIDEO") {
+    if (!sender.tab?.id || !/^https:\/\/(www\.)?(x|twitter)\.com\//.test(sender.url || "")) return;
+    const handle = WakuX.profile(message.handle), tweetId = String(message.tweetId || "");
+    if (!handle || !/^\d{1,25}$/.test(tweetId)) { reply({ ok: false }); return; }
+    (async () => {
+      async function request(url, parse) {
+        const controller = new AbortController(), timer = setTimeout(() => controller.abort(), 12000);
+        try {
+          const response = await fetch(url, { signal: controller.signal, credentials: "omit", referrerPolicy: "no-referrer" });
+          return response.ok ? parse(await response.json(), handle, tweetId) : [];
+        } catch { return []; }
+        finally { clearTimeout(timer); }
+      }
+      const direct = await request(`https://cdn.syndication.twimg.com/tweet-result?id=${tweetId}&lang=en&token=0`, WakuX.extractSyndication);
+      if (direct.length) return direct;
+      return request(`https://api.fxtwitter.com/${encodeURIComponent(handle)}/status/${tweetId}`, WakuX.extractFxTwitter);
+    })().then(items => reply({ ok: true, items })).catch(() => reply({ ok: false, items: [] }));
+    return true;
+  }
   if (scanMessages.has(message.type)) {
     if (!sender.tab?.id || (!/^https:\/\/(www\.)?(x|twitter)\.com\//.test(sender.url || "") && !WakuFacebook.isFacebook(sender.url) && !WakuPixiv.isPixiv(sender.url))) return;
     // Serialize saves and restores so a quick reload cannot restore an older save.

@@ -31,7 +31,7 @@ const responses = {
   many: { data: { timeline: Array.from({ length: 25 }, (_, index) => tweet("example", String(1000 + index), [`batch${index}`])) } }
 };
 const html = `<!doctype html><html><head><meta charset="utf-8"><title>X fixture</title></head><body style="margin:0;background:#101719;color:white;height:7000px;font:14px system-ui"><main data-testid="primaryColumn" style="padding:40px 80px">
-<h1 data-testid="UserName">Example</h1><p>@example · Ảnh và video</p>
+<h1 data-testid="UserName"><span>Example</span><span>@example</span></h1><p>@example · Ảnh và video</p>
 <a href="/example/status/111/photo/1"><img width="100" src="https://pbs.twimg.com/media/first?format=jpg&name=small"></a>
 <a href="/example/status/555/photo/1"><img width="100" src="https://pbs.twimg.com/media/domOnly.jpg"></a>
 <a href="/other/status/222/photo/1"><img width="100" src="https://pbs.twimg.com/media/ignoreOther.jpg"></a>
@@ -159,12 +159,13 @@ test("docked panel: passive capture, collapse, tab switching, persisted selectio
     let state = await waitFor(status, value => value.items.length === 5 && !value.restoring, "initial photos should be captured without pressing a collect button");
     assert.ok(!state.items.some(item => item.id === "videoOnly" || item.id === "ignoreOther"));
     assert.equal(state.profileId, "987654321");
+    assert.equal(state.name, "Example", "name extraction should not include the handle");
     assert.equal(await page.evaluate(() => scrollY), 0, "extension must not scroll the page automatically");
     await worker.evaluate(() => chrome.storage.local.set({ panelEnabled: true }));
     await send({ type: "OPEN_PANEL" });
     let panel = page.frameLocator("#waku-panel iframe");
     await panel.locator("#image-count").filter({ hasText: "5 ảnh" }).waitFor();
-    assert.equal(await page.locator("#waku-panel").getAttribute("data-waku-version"), "1.3.0");
+    assert.equal(await page.locator("#waku-panel").getAttribute("data-waku-version"), "1.4.6");
     assert.equal(await panel.locator(".photo").count(), 5);
     await panel.getByLabel("Chọn ảnh second", { exact: true }).uncheck();
     await waitFor(status, value => value.selected.length === 4, "selection should update in the content state");

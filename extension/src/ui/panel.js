@@ -14,6 +14,9 @@ let restoredScroll = false;
 let scrollTimer, errorTimer;
 const rows = new Map();
 const busy = new Set();
+const mediaTypes = { photo: true, video: true };
+const kindOf = item => item.kind === "video" ? "video" : "photo";
+const visibleItems = () => state.items.filter(item => mediaTypes[kindOf(item)]);
 const command = (name, data = {}) => {
   if (parentOrigin) parent.postMessage({ type: "WAKU_PANEL_COMMAND", command: name, ...data }, parentOrigin);
 };
@@ -41,7 +44,7 @@ function showError(error) {
 }
 function groupPosts() {
   const posts = new Map();
-  for (const item of state.items) {
+  for (const item of visibleItems()) {
     if (!posts.has(item.tweetId)) posts.set(item.tweetId, { id: item.tweetId, items: [], text: item.text, date: item.date });
     const post = posts.get(item.tweetId);
     post.items.push(item);
@@ -105,12 +108,13 @@ function renderRows(posts, selected) {
     if (!row) { row = createRow(post); rows.set(post.id, row); }
     row.post = post;
     row.element.dataset.photoCount = Math.min(4, post.items.length);
-    row.link.textContent = post.text || (state.platform === "facebook" ? `Ảnh Facebook ${post.id}` : `Bài đăng ${post.id}`);
+    row.link.textContent = post.text || (state.platform === "facebook" ? `${post.items[0].kind === "video" ? "Video" : "Ảnh"} Facebook ${post.id}` : `Bài đăng ${post.id}`);
     row.link.title = row.link.textContent;
-    row.link.href = state.platform === "pixiv" ? `https://www.pixiv.net/artworks/${post.id}` : state.platform === "facebook" ? `https://www.facebook.com/photo/?fbid=${post.id}` : `https://x.com/${state.handle}/status/${post.id}`;
+    row.link.href = state.platform === "pixiv" ? `https://www.pixiv.net/artworks/${post.id}` : state.platform === "facebook" ? (post.items[0].kind === "video" ? `https://www.facebook.com/watch/?v=${post.id}` : `https://www.facebook.com/photo/?fbid=${post.id}`) : `https://x.com/${state.handle}/status/${post.id}`;
     row.date.textContent = formatDate(post.date) || `#${post.id}`;
     row.date.title = row.date.textContent;
-    row.count.textContent = `${post.items.length} ảnh`;
+    row.count.textContent = [post.items.filter(item => kindOf(item) === "photo").length ? `${post.items.filter(item => kindOf(item) === "photo").length} ảnh` : "", post.items.filter(item => kindOf(item) === "video").length ? `${post.items.filter(item => kindOf(item) === "video").length} video` : ""].filter(Boolean).join(" · ");
+    if (post.items.some(item => item.videoMode === "dash" && !item.audioUrl)) row.count.textContent += " · không thấy tiếng";
     const chosen = post.items.filter(item => selected.has(item.id)).length;
     row.check.checked = chosen === post.items.length;
     row.check.indeterminate = chosen > 0 && chosen < post.items.length;
@@ -124,10 +128,11 @@ function renderRows(posts, selected) {
         image.src = item.thumbnail;
         image.loading = "lazy";
         image.alt = "";
+        if (kindOf(item) === "video") label.classList.add("video");
         image.addEventListener("error", () => { image.hidden = true; label.classList.add("failed"); });
         const check = document.createElement("input");
         check.type = "checkbox";
-        check.setAttribute("aria-label", `Chọn ảnh ${item.id}`);
+        check.setAttribute("aria-label", `Chọn ${kindOf(item) === "video" ? "video" : "ảnh"} ${item.id}`);
         check.addEventListener("change", () => command("SELECT", { ids: [item.id], selected: check.checked }));
         label.append(image, check);
         row.photos.append(label);
@@ -138,6 +143,8 @@ function renderRows(posts, selected) {
       photo.check.checked = selected.has(item.id);
       photo.label.classList.toggle("selected", selected.has(item.id));
     }
+    const keep = new Set(post.items.map(item => item.id));
+    for (const [id, photo] of row.images) if (!keep.has(id)) { photo.label.remove(); row.images.delete(id); }
     const current = $("rows").children[index];
     if (current !== row.element) $("rows").insertBefore(row.element, current || null);
   }
@@ -148,7 +155,14 @@ function render() {
     currentHandle = state.handle; visible = 60; restoredScroll = false;
     $("rows").replaceChildren(); rows.clear(); $("list").scrollTop = 0;
   }
-  const selected = new Set(state.selected);
+  const shownItems = visibleItems();
+  const shownIds = new Set(shownItems.map(item => item.id));
+  const selected = new Set(state.selected.filter(id => shownIds.has(id)));
+  for (const type of ["photo", "video"]) {
+    const available = state.items.some(item => kindOf(item) === type);
+    $(`type-${type}`).disabled = !available;
+    $(`type-${type}`).checked = available && mediaTypes[type];
+  }
   const posts = groupPosts();
   $("profile-name").textContent = state.name || state.handle || "Mở một profile";
   $("profile-handle").textContent = state.handle ? `${state.platform === "facebook" ? "Facebook · " : "@"}${state.handle}` : "Tab Ảnh / Media";
@@ -160,13 +174,15 @@ function render() {
     if (avatar.src !== url.href) avatar.src = url.href;
   } catch { avatar.hidden = true; }
   $("post-count").textContent = state.platform === "facebook" ? "Facebook" : `${posts.length.toLocaleString("vi-VN")} bài`;
-  $("image-count").textContent = `${state.items.length.toLocaleString("vi-VN")} ảnh`;
+  const photos = shownItems.filter(item => kindOf(item) === "photo").length, videos = shownItems.length - photos;
+  $("image-count").textContent = [photos ? `${photos.toLocaleString("vi-VN")} ảnh` : "", videos ? `${videos.toLocaleString("vi-VN")} video` : ""].filter(Boolean).join(" · ") || "0 mục";
   $("selection-count").textContent = selected.size ? `Đã chọn ${selected.size}` : "Chọn tất cả";
-  $("select-all").checked = !!state.items.length && selected.size === state.items.length;
-  $("select-all").indeterminate = selected.size > 0 && selected.size < state.items.length;
+  $("select-all").checked = !!shownItems.length && selected.size === shownItems.length;
+  $("select-all").indeterminate = selected.size > 0 && selected.size < shownItems.length;
   $("select-new").checked = state.selectNew !== false;
-  $("hint").textContent = state.pixivErrors ? `Không lấy được ảnh gốc của ${state.pixivErrors} tác phẩm. Kiểm tra mạng và quyền xem, rồi tải lại trang.` : state.restoring ? "Đang khôi phục danh sách đã lưu…" : state.items.length >= state.limit ? `Đã đạt giới hạn ${state.limit} ảnh trong profile này.` : state.platform === "facebook" && !state.onPhotos ? "Mở tab Ảnh của profile Facebook để nhận ảnh." : !state.onProfile && state.handle ? "Đang giữ danh sách cũ. Mở profile để nhận thêm ảnh." : "Bạn cuộn trang, ảnh mới tự xuất hiện ở đây.";
-  $("empty").hidden = !!state.items.length;
+  $("hint").textContent = state.pixivErrors ? (state.pixivRestricted ? "Pixiv chưa cho phép lấy tác phẩm giới hạn 18+. Kiểm tra đăng nhập và cài đặt hiển thị R-18, rồi tải lại trang." : `Không lấy được nội dung của ${state.pixivErrors} tác phẩm. Kiểm tra mạng và quyền xem, rồi tải lại trang.`) : state.restoring ? "Đang khôi phục danh sách đã lưu…" : state.facebookVideoPage && !state.items.length ? (state.facebookSearching ? "Đang tìm video Reel hiện tại…" : "Chưa nhận được video. Kiểm tra quyền xem hoặc thử tìm lại.") : state.items.length >= state.limit ? `Đã đạt giới hạn ${state.limit} ảnh trong profile này.` : state.platform === "facebook" && !state.onPhotos ? "Mở tab Ảnh của profile Facebook để nhận ảnh." : !state.onProfile && state.handle ? "Đang giữ danh sách cũ. Mở profile để nhận thêm ảnh." : "Bạn cuộn trang, ảnh mới tự xuất hiện ở đây.";
+  $("rescan-facebook").hidden = !state.facebookVideoPage || !!state.items.length || !!state.facebookSearching || !!state.restoring;
+  $("empty").hidden = !!shownItems.length;
   $("more").hidden = posts.length <= visible;
   renderRows(posts, selected);
   if (!restoredScroll && !state.restoring && document.documentElement.clientHeight > 0) {
@@ -180,13 +196,14 @@ function render() {
     restoredScroll = true;
   }
   updateDownloadControls();
-  $("download-label").textContent = selected.size ? `Tải ${selected.size.toLocaleString("vi-VN")} ảnh đã chọn` : "Chưa có ảnh để tải";
+  $("download-label").textContent = selected.size ? `Tải ${selected.size.toLocaleString("vi-VN")} mục đã chọn` : "Chưa có mục để tải";
   renderDestination();
   renderJob();
 }
 function updateDownloadControls() {
   const locked = ["running", "paused"].includes(currentJob?.status) || busy.has("download");
-  $("download").disabled = !state.selected.length || locked;
+  const selected = new Set(state.selected);
+  $("download").disabled = !visibleItems().some(item => selected.has(item.id)) || locked;
   for (const row of rows.values()) row.download.disabled = locked;
 }
 function updateProgress() {
@@ -197,22 +214,23 @@ function updateProgress() {
 function renderDestination() {
   const sameProfile = state.handle && currentJob?.handle?.toLowerCase() === state.handle.toLowerCase() && (currentJob.platform || "x") === (state.platform || "x");
   const legacy = sameProfile && currentJob.pathVersion !== 2;
-  const count = sameProfile && currentJob.folderCount > 0 ? ` (${currentJob.folderCount})` : legacy ? "" : " (số ảnh)";
+  const unit = state.items.some(item => kindOf(item) === "video") ? "mục" : "ảnh";
+  const count = sameProfile && currentJob.folderCount > 0 ? ` (${currentJob.folderCount})` : legacy ? "" : ` (số ${unit})`;
   const base = legacy ? (state.platform === "facebook" ? "FacebookDownload" : "XDownload") : `WakuDownload / ${state.platform === "pixiv" ? "Pixiv" : state.platform === "facebook" ? "Facebook" : "X"}`;
   $("destination").textContent = `${base} / ${state.handle || "username"}${count}`;
-  $("destination").title = sameProfile && currentJob.folderCount > 0 ? "Thư mục của lượt tải gần nhất" : "Số ảnh được thêm vào tên thư mục khi bắt đầu tải";
+  $("destination").title = sameProfile && currentJob.folderCount > 0 ? "Thư mục của lượt tải gần nhất" : "Số mục được thêm vào tên thư mục khi bắt đầu tải";
 }
 function renderJob() {
   $("job").hidden = !currentJob;
   if (!currentJob) return;
   const job = currentJob;
-  const labels = { running: "Đang tải", paused: "Đã tạm dừng", complete: "Đã tải xong", cancelled: "Đã dừng tải", finished_with_errors: "Tải xong, có ảnh lỗi" };
+  const labels = { running: "Đang tải", paused: "Đã tạm dừng", complete: "Đã tải xong", cancelled: "Đã dừng tải", finished_with_errors: "Tải xong, có mục lỗi" };
   const label = job.status === "finished_with_errors" && !job.failed && job.sourceStatus === "failed" ? "Tải xong, lỗi file nguồn" : labels[job.status] || job.status;
   $("job-title").textContent = `${label} · ${job.platform === "pixiv" ? "Pixiv " : job.platform === "facebook" ? "FB " : "@"}${job.handle}`;
   $("job-count").textContent = `${job.done}/${job.total}`;
   $("progress").max = Math.max(1, job.total);
   $("progress").value = job.done + job.failed + job.cancelled;
-  $("job-detail").textContent = [job.failed ? `${job.failed} ảnh lỗi: ${job.errors?.[0] || "Tải gián đoạn"}` : "", job.sourceStatus === "failed" ? `Lỗi #nguon.txt: ${job.sourceError}` : "", job.active ? `${job.active} đang tải${job.status === "paused" ? " nốt" : ""}` : "", job.queued ? `${job.queued} đang đợi` : "", job.waiting ? `${job.waiting} chờ tự thử lại` : "", job.skipped ? `Bỏ qua ${job.skipped} ảnh đã tải` : "", job.cancelled ? `${job.cancelled} ảnh chưa tải` : ""].filter(Boolean).join(" · ");
+  $("job-detail").textContent = [job.failed ? `${job.failed} mục lỗi: ${job.errors?.[0] || "Tải gián đoạn"}` : "", job.sourceStatus === "failed" ? `Lỗi #nguon.txt: ${job.sourceError}` : "", job.active ? `${job.active} đang tải${job.status === "paused" ? " nốt" : ""}` : "", job.queued ? `${job.queued} đang đợi` : "", job.waiting ? `${job.waiting} chờ tự thử lại` : "", job.skipped ? `Bỏ qua ${job.skipped} mục đã tải` : "", job.cancelled ? `${job.cancelled} mục chưa tải` : ""].filter(Boolean).join(" · ");
   $("job-detail").title = $("job-detail").textContent;
   $("pause").hidden = !["running", "paused"].includes(job.status);
   $("pause").textContent = job.status === "paused" ? "Tiếp tục" : "Tạm dừng";
@@ -245,7 +263,12 @@ window.addEventListener("message", event => {
 });
 $("avatar").addEventListener("error", () => { $("avatar").hidden = true; });
 $("collapse").addEventListener("click", () => command("COLLAPSE"));
-$("select-all").addEventListener("change", event => command("SELECT_ALL", { selected: event.target.checked }));
+$("rescan-facebook").addEventListener("click", () => command("RESCAN_FACEBOOK"));
+$("select-all").addEventListener("change", event => {
+  if (mediaTypes.photo && mediaTypes.video) command("SELECT_ALL", { selected: event.target.checked });
+  else command("SELECT", { ids: visibleItems().map(item => item.id), selected: event.target.checked });
+});
+for (const type of ["photo", "video"]) $(`type-${type}`).addEventListener("change", event => { mediaTypes[type] = event.target.checked; render(); });
 $("select-new").addEventListener("change", event => command("SELECT_NEW", { selected: event.target.checked }));
 $("skip-saved").addEventListener("change", () => { void chromeCall(() => chrome.storage.local.set({ skipSaved: $("skip-saved").checked })).catch(showError); });
 $("more").addEventListener("click", () => { visible += 60; render(); });
@@ -253,7 +276,7 @@ $("list").addEventListener("scroll", () => {
   clearTimeout(scrollTimer);
   scrollTimer = setTimeout(() => command("SCROLL", { scrollTop: $("list").scrollTop }), 120);
 }, { passive: true });
-$("download").addEventListener("click", () => { const selected = new Set(state.selected); void startDownload(state.items.filter(item => selected.has(item.id))); });
+$("download").addEventListener("click", () => { const selected = new Set(state.selected); void startDownload(visibleItems().filter(item => selected.has(item.id))); });
 $("pause").addEventListener("click", () => {
   const button = $("pause");
   button.disabled = true;

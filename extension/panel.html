@@ -11,12 +11,12 @@
   <script src="src/ui/panel.js" defer></script>
 </head>
 <body>
-  <header><div class="brand"><span class="logo">W↓</span><h1>Waku Download</h1><span class="version">1.3.0</span></div><button id="collapse" class="header-button" title="Thu gọn thành nút nhỏ" aria-label="Thu gọn">»</button></header>
+  <header><div class="brand"><span class="logo">W↓</span><h1>Waku Download</h1><span class="version">1.4.4</span></div><button id="collapse" class="header-button" title="Thu gọn thành nút nhỏ" aria-label="Thu gọn">»</button></header>
   <section class="profile card"><div class="avatar"><span id="avatar-fallback">@</span><img id="avatar" alt="" hidden></div><div class="profile-copy"><strong id="profile-name">Mở một profile X</strong><span id="profile-handle">Tab Ảnh / Media</span></div><span class="live"><i></i> Tự nhận</span></section>
-  <section class="options card"><div class="scope"><span>Phạm vi</span><strong>Ảnh đã load trên profile</strong></div><div class="checks"><label><input id="skip-saved" type="checkbox" checked> Bỏ qua ảnh đã tải</label><label><input id="select-new" type="checkbox" checked> Chọn ảnh mới</label></div></section>
+  <section class="options card"><div class="scope"><span>Loại</span><div class="checks"><label><input id="type-photo" type="checkbox" checked> Ảnh</label><label><input id="type-video" type="checkbox" checked> Video</label></div></div><div class="checks"><label><input id="skip-saved" type="checkbox" checked> Bỏ qua đã tải</label><label><input id="select-new" type="checkbox" checked> Chọn mới</label></div></section>
   <section class="collection card">
     <div class="summary"><div><strong id="post-count">0 bài</strong><span class="dot">·</span><strong id="image-count">0 ảnh</strong></div><label title="Chọn hoặc bỏ chọn toàn bộ ảnh"><input id="select-all" type="checkbox"><span id="selection-count">Chọn tất cả</span></label></div>
-    <p id="hint" class="hint" role="status">Bạn cuộn trang, ảnh mới tự xuất hiện ở đây.</p>
+    <p class="hint" role="status"><span id="hint">Bạn cuộn trang, ảnh mới tự xuất hiện ở đây.</span> <button id="rescan-facebook" class="text-button" hidden>Tìm lại video</button></p>
     <div id="list" class="list"><div id="rows"></div><div id="empty" class="empty"><span>▧</span><strong>Chưa có ảnh nào</strong><p>Mở profile → tab Ảnh rồi cuộn trang.<br>Ảnh sẽ được gom tự động, kể cả khi thu gọn.</p></div><button id="more" class="more" hidden>Hiện thêm bài đăng</button></div>
   </section>
   <footer>

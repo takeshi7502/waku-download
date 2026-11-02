@@ -91,5 +91,6 @@ progress::-webkit-progress-value { background: #a38af5; }
 #job-count { font-size: 9px; color: #b3accf; }
 #job-detail { margin: 4px 0 0; color: #a0a3ba; font-size: 9px; line-height: 1.5; max-height: 28px; overflow: hidden; }
 #job-detail:empty { display: none; }
+.photo.video::after { content: "▶"; position: absolute; inset: 0; display: grid; place-items: center; color: white; font-size: 17px; text-shadow: 0 1px 6px #000; pointer-events: none; }
 #error { color: #f19a9a; font-size: 10px; line-height: 1.5; margin: 0 0 7px; max-height: 30px; overflow: hidden; }
 @media (max-height: 450px) { .profile { padding: 6px 9px; } .avatar { height: 28px; width: 28px; } .options { padding: 6px 9px; } .checks { margin-top: 6px; } header { min-height: 36px; } body { gap: 5px; } }
