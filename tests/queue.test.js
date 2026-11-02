@@ -17,13 +17,14 @@ async function harness(saved = {}, options = {}) {
   let onMessage;
   let onChanged;
   let onAlarm;
+  let now = Date.now();
   const calls = [];
   const sourceCalls = [];
   const writes = [];
   const operations = [];
   let context;
   const chrome = {
-    runtime: { getURL: path => `chrome-extension://test/${path}`, onMessage: { addListener: listener => { onMessage = listener; } } },
+    runtime: { getURL: path => `chrome-extension://test/${path}`, sendMessage: async () => ({}), onMessage: { addListener: listener => { onMessage = listener; } } },
     storage: {
       local: { get: async () => structuredClone(store), set: async values => {
         const snapshot = structuredClone(values);
@@ -50,7 +51,7 @@ async function harness(saved = {}, options = {}) {
         }
         calls.push(settings);
         operations.push("download");
-        if (options.fail?.(settings)) throw new Error("NETWORK_FAILED");
+        if (options.fail?.(settings)) throw new Error("SERVER_FORBIDDEN");
         const next = ++id;
         downloads.set(next, { id: next, state: "in_progress", url: settings.url });
         return next;
@@ -60,8 +61,9 @@ async function harness(saved = {}, options = {}) {
       onChanged: { addListener: listener => { onChanged = listener; } }
     }
   };
-  context = vm.createContext({ chrome, URL, crypto: { randomUUID }, console, importScripts: (...files) => { for (const file of files) vm.runInContext(file.endsWith("pixiv.js") ? pixiv : file.endsWith("facebook.js") ? facebook : core, context); } });
+  context = vm.createContext({ chrome, URL, Date: class extends Date { static now() { return now; } }, pixivFetch: options.pixivFetch, crypto: { randomUUID }, console, importScripts: (...files) => { for (const file of files) vm.runInContext(file.endsWith("pixiv.js") ? pixiv : file.endsWith("facebook.js") ? facebook : core, context); } });
   vm.runInContext(options.workerCode || workerCode, context);
+  if (options.pixivFetch) vm.runInContext("pixivBlob = pixivFetch", context);
   const sendFrom = (message, sender) => new Promise(resolve => {
     let replied = false;
     const pending = onMessage(message, sender, value => { replied = true; resolve(value); });
@@ -70,9 +72,9 @@ async function harness(saved = {}, options = {}) {
   const send = message => sendFrom(message, { url: "chrome-extension://test/panel.html", tab: { id: 1 } });
   const flush = () => send({ type: "JOB" });
   await flush();
-  return { store, session, calls, sourceCalls, writes, operations, downloads, send, sendFrom, flush, alarm: async () => { onAlarm({ name: "waku-queue" }); return flush(); }, complete: async (downloadId, state = "complete") => {
+  return { store, session, calls, sourceCalls, writes, operations, downloads, send, sendFrom, flush, advance: ms => { now += ms; }, alarm: async () => { onAlarm({ name: "waku-retry" }); return flush(); }, complete: async (downloadId, state = "complete", error = "SERVER_FORBIDDEN") => {
     downloads.get(downloadId).state = state;
-    onChanged({ id: downloadId, state: { current: state }, ...(state === "interrupted" ? { error: { current: "NETWORK_FAILED" } } : {}) });
+    onChanged({ id: downloadId, state: { current: state }, ...(state === "interrupted" ? { error: { current: error } } : {}) });
     return flush();
   } };
 }
@@ -99,6 +101,93 @@ test("limits concurrency to three; advances on completion and saves only success
   assert.equal(skipped.job.skipped, 4);
   assert.equal(skipped.job.total, 0);
   assert.equal(skipped.job.status, "complete");
+});
+
+test("automatically retries temporary failures with a limit and preserves the folder", async () => {
+  const h = await harness();
+  await h.send({ type: "DOWNLOAD", handle: "example", items: [image("a")] });
+  let result = await h.complete(1, "interrupted", "NETWORK_DISCONNECTED");
+  assert.equal(result.job.waiting, 1);
+  assert.equal(result.job.status, "running");
+  await h.alarm();
+  assert.equal(h.calls.length, 1, "retry must not run before its delay");
+  h.advance(5000); await h.alarm();
+  assert.equal(h.calls.length, 2);
+  assert.equal(h.calls[1].filename, h.calls[0].filename);
+  result = await h.complete(2, "interrupted", "NETWORK_TIMEOUT");
+  assert.equal(result.job.waiting, 1);
+  h.advance(15000); await h.alarm();
+  assert.equal(h.calls.length, 3);
+  result = await h.complete(3, "interrupted", "NETWORK_FAILED");
+  assert.equal(result.job.failed, 1);
+  assert.equal(result.job.status, "finished_with_errors");
+  assert.match(result.job.errors[0], /Kiểm tra mạng/);
+  await h.send({ type: "RETRY_DOWNLOAD" });
+  assert.equal(h.calls.length, 4, "manual retry gets a fresh retry budget");
+  assert.equal((await h.complete(4)).job.status, "complete");
+});
+
+test("pause lets active downloads finish, keeps queued work and survives worker restart", async () => {
+  const h = await harness();
+  await h.send({ type: "DOWNLOAD", handle: "example", items: ["a", "b", "c", "d"].map(image) });
+  let result = await h.send({ type: "PAUSE_DOWNLOAD" });
+  assert.equal(result.job.status, "paused");
+  result = await h.complete(1);
+  assert.equal(result.job.done, 1);
+  assert.equal(h.calls.length, 3, "pause must not start queued photos");
+  assert.equal((await h.send({ type: "DOWNLOAD", handle: "example", items: [image("z")] })).ok, false);
+  const restored = await harness(h.store, { downloads: h.downloads });
+  assert.equal((await restored.flush()).job.status, "paused");
+  assert.equal(restored.calls.length, 0);
+  result = await restored.send({ type: "RESUME_DOWNLOAD" });
+  assert.equal(result.job.status, "running");
+  assert.equal(restored.calls.length, 1);
+  assert.equal(restored.calls[0].filename, "WakuDownload/X/example (4)/123_d.jpg");
+});
+
+test("a pending automatic retry resumes after worker restart", async () => {
+  const h = await harness();
+  await h.send({ type: "DOWNLOAD", handle: "example", items: [image("a")] });
+  await h.complete(1, "interrupted", "NETWORK_DISCONNECTED");
+  const restored = await harness(h.store, { downloads: h.downloads });
+  assert.equal((await restored.flush()).job.waiting, 1);
+  restored.advance(6000);
+  await restored.alarm();
+  assert.equal(restored.calls.length, 1);
+  assert.equal(restored.calls[0].filename, h.calls[0].filename);
+});
+
+test("pause and cancel stay responsive while Pixiv is preparing a large image", async () => {
+  let release;
+  const pending = new Promise(resolve => { release = resolve; });
+  const h = await harness({}, { pixivFetch: () => pending });
+  const photo = { platform: "pixiv", handle: "42", id: "123_p0", tweetId: "123", url: "https://i.pximg.net/img-original/img/2024/01/02/03/04/05/123_p0.png" };
+  const started = await h.send({ type: "DOWNLOAD", platform: "pixiv", handle: "42", items: [photo] });
+  assert.equal(started.job.active, 1);
+  assert.equal((await h.send({ type: "PAUSE_DOWNLOAD" })).job.status, "paused");
+  assert.equal((await h.send({ type: "CANCEL_DOWNLOAD" })).job.cancelled, 1);
+  release("blob:example");
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal((await h.flush()).job.status, "cancelled");
+  assert.equal(h.calls.length, 0, "a late Pixiv response must not restart cancelled work");
+});
+
+test("a Pixiv image already preparing finishes while paused without starting the next", async () => {
+  let release;
+  const pending = new Promise(resolve => { release = resolve; });
+  const h = await harness({}, { pixivFetch: () => pending });
+  const photo = index => ({ platform: "pixiv", handle: "42", id: `${index}_p0`, tweetId: String(index), url: `https://i.pximg.net/img-original/img/2024/01/02/03/04/05/${index}_p0.png` });
+  await h.send({ type: "DOWNLOAD", platform: "pixiv", handle: "42", items: [123,124,125,126].map(photo) });
+  await h.send({ type: "PAUSE_DOWNLOAD" });
+  release("blob:example");
+  for (let i = 0; i < 3; i++) { await new Promise(resolve => setImmediate(resolve)); await h.flush(); }
+  assert.equal(h.calls.length, 3);
+  assert.equal((await h.flush()).job.status, "paused");
+  await h.complete(1);
+  assert.equal(h.calls.length, 3);
+  await h.send({ type: "RESUME_DOWNLOAD" });
+  for (let i = 0; i < 3; i++) { await new Promise(resolve => setImmediate(resolve)); await h.flush(); }
+  assert.equal(h.calls.length, 4);
 });
 
 test("refills download slots before storage writes and reading progress never saves the full job", async () => {

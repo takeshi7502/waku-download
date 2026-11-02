@@ -164,7 +164,7 @@ test("docked panel: passive capture, collapse, tab switching, persisted selectio
     await send({ type: "OPEN_PANEL" });
     let panel = page.frameLocator("#waku-panel iframe");
     await panel.locator("#image-count").filter({ hasText: "5 ảnh" }).waitFor();
-    assert.equal(await page.locator("#waku-panel").getAttribute("data-waku-version"), "1.2.2");
+    assert.equal(await page.locator("#waku-panel").getAttribute("data-waku-version"), "1.3.0");
     assert.equal(await panel.locator(".photo").count(), 5);
     await panel.getByLabel("Chọn ảnh second", { exact: true }).uncheck();
     await waitFor(status, value => value.selected.length === 4, "selection should update in the content state");
@@ -212,6 +212,11 @@ test("docked panel: passive capture, collapse, tab switching, persisted selectio
     await panel.locator("#download").click();
     await panel.locator("#job-title").filter({ hasText: "Đang tải" }).waitFor();
     assert.equal(await panel.locator("#job-count").textContent(), "0/33");
+    await panel.locator("#pause").click();
+    await panel.locator("#job-title").filter({ hasText: "Đã tạm dừng" }).waitFor();
+    assert.equal(await panel.locator("#download").isDisabled(), true);
+    await panel.locator("#pause").filter({ hasText: "Tiếp tục" }).click();
+    await panel.locator("#job-title").filter({ hasText: "Đang tải" }).waitFor();
     const source = await worker.evaluate(() => downloadSettings.find(item => item.filename.endsWith("/#nguon.txt")));
     assert.equal(source.filename, "WakuDownload/X/example (33)/#nguon.txt");
     assert.match(decodeURIComponent(source.url.split(",")[1]), /https:\/\/x\.com\/i\/user\/987654321/);

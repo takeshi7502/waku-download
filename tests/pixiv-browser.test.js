@@ -53,9 +53,9 @@ test("Pixiv collects original pages, validates authors, persists and downloads",
     await worker.evaluate(() => { globalThis.settings = []; pixivBlob = async url => url; chrome.downloads.download = async s => { settings.push(s); return settings.length; }; chrome.downloads.search = async () => [{state:"in_progress"}]; });
     await panel.locator("#download").click();
     await panel.locator("#job-count").filter({hasText:"0/4"}).waitFor();
-    const calls = await worker.evaluate(() => settings);
-    assert.equal(calls[0].filename, "WakuDownload/Pixiv/42 (4)/123_p0.png");
-    assert.equal(calls[0].url, original("123",0));
+    const calls = await waitFor(() => worker.evaluate(() => settings), values => values.some(value => value.url === original("123", 0)));
+    const photo = calls.find(value => value.url === original("123", 0));
+    assert.equal(photo.filename, "WakuDownload/Pixiv/42 (4)/123_p0.png");
     const source = calls.find(x => x.filename.endsWith("/#nguon.txt"));
     assert.match(decodeURIComponent(source.url), /https:\/\/www.pixiv.net\/users\/42/);
     await page.waitForTimeout(500); await page.reload();

@@ -114,7 +114,7 @@ function renderRows(posts, selected) {
     const chosen = post.items.filter(item => selected.has(item.id)).length;
     row.check.checked = chosen === post.items.length;
     row.check.indeterminate = chosen > 0 && chosen < post.items.length;
-    row.download.disabled = currentJob?.status === "running" || busy.has("download");
+    row.download.disabled = ["running", "paused"].includes(currentJob?.status) || busy.has("download");
     for (const item of post.items) {
       let photo = row.images.get(item.id);
       if (!photo) {
@@ -165,7 +165,7 @@ function render() {
   $("select-all").checked = !!state.items.length && selected.size === state.items.length;
   $("select-all").indeterminate = selected.size > 0 && selected.size < state.items.length;
   $("select-new").checked = state.selectNew !== false;
-  $("hint").textContent = state.pixivErrors ? `Kh?ng l?y ???c ?nh g?c c?a ${state.pixivErrors} t?c ph?m. T?i l?i trang v? th? l?i.` : state.restoring ? "Đang khôi phục danh sách đã lưu…" : state.items.length >= state.limit ? `Đã đạt giới hạn ${state.limit} ảnh trong profile này.` : state.platform === "facebook" && !state.onPhotos ? "Mở tab Ảnh của profile Facebook để nhận ảnh." : !state.onProfile && state.handle ? "Đang giữ danh sách cũ. Mở profile để nhận thêm ảnh." : "Bạn cuộn trang, ảnh mới tự xuất hiện ở đây.";
+  $("hint").textContent = state.pixivErrors ? `Không lấy được ảnh gốc của ${state.pixivErrors} tác phẩm. Kiểm tra mạng và quyền xem, rồi tải lại trang.` : state.restoring ? "Đang khôi phục danh sách đã lưu…" : state.items.length >= state.limit ? `Đã đạt giới hạn ${state.limit} ảnh trong profile này.` : state.platform === "facebook" && !state.onPhotos ? "Mở tab Ảnh của profile Facebook để nhận ảnh." : !state.onProfile && state.handle ? "Đang giữ danh sách cũ. Mở profile để nhận thêm ảnh." : "Bạn cuộn trang, ảnh mới tự xuất hiện ở đây.";
   $("empty").hidden = !!state.items.length;
   $("more").hidden = posts.length <= visible;
   renderRows(posts, selected);
@@ -185,7 +185,7 @@ function render() {
   renderJob();
 }
 function updateDownloadControls() {
-  const locked = currentJob?.status === "running" || busy.has("download");
+  const locked = ["running", "paused"].includes(currentJob?.status) || busy.has("download");
   $("download").disabled = !state.selected.length || locked;
   for (const row of rows.values()) row.download.disabled = locked;
 }
@@ -206,21 +206,24 @@ function renderJob() {
   $("job").hidden = !currentJob;
   if (!currentJob) return;
   const job = currentJob;
-  const labels = { running: "Đang tải", complete: "Đã tải xong", cancelled: "Đã dừng tải", finished_with_errors: "Tải xong, có ảnh lỗi" };
+  const labels = { running: "Đang tải", paused: "Đã tạm dừng", complete: "Đã tải xong", cancelled: "Đã dừng tải", finished_with_errors: "Tải xong, có ảnh lỗi" };
   const label = job.status === "finished_with_errors" && !job.failed && job.sourceStatus === "failed" ? "Tải xong, lỗi file nguồn" : labels[job.status] || job.status;
   $("job-title").textContent = `${label} · ${job.platform === "pixiv" ? "Pixiv " : job.platform === "facebook" ? "FB " : "@"}${job.handle}`;
   $("job-count").textContent = `${job.done}/${job.total}`;
   $("progress").max = Math.max(1, job.total);
   $("progress").value = job.done + job.failed + job.cancelled;
-  $("job-detail").textContent = [job.active ? `${job.active} đang tải` : "", job.queued ? `${job.queued} đang đợi` : "", job.skipped ? `Bỏ qua ${job.skipped} ảnh đã tải` : "", job.failed ? `${job.failed} ảnh lỗi: ${job.errors?.[0] || "Tải gián đoạn"}` : "", job.sourceStatus === "failed" ? `Lỗi #nguon.txt: ${job.sourceError}` : "", job.cancelled ? `${job.cancelled} ảnh chưa tải` : ""].filter(Boolean).join(" · ");
+  $("job-detail").textContent = [job.failed ? `${job.failed} ảnh lỗi: ${job.errors?.[0] || "Tải gián đoạn"}` : "", job.sourceStatus === "failed" ? `Lỗi #nguon.txt: ${job.sourceError}` : "", job.active ? `${job.active} đang tải${job.status === "paused" ? " nốt" : ""}` : "", job.queued ? `${job.queued} đang đợi` : "", job.waiting ? `${job.waiting} chờ tự thử lại` : "", job.skipped ? `Bỏ qua ${job.skipped} ảnh đã tải` : "", job.cancelled ? `${job.cancelled} ảnh chưa tải` : ""].filter(Boolean).join(" · ");
   $("job-detail").title = $("job-detail").textContent;
-  $("cancel").hidden = job.status !== "running";
-  $("retry").hidden = (!job.failed && job.sourceStatus !== "failed") || job.status === "running";
+  $("pause").hidden = !["running", "paused"].includes(job.status);
+  $("pause").textContent = job.status === "paused" ? "Tiếp tục" : "Tạm dừng";
+  $("pause").title = job.status === "running" ? "Ảnh đang tải sẽ tiếp tục đến khi xong" : "Tiếp tục những ảnh đang chờ";
+  $("cancel").hidden = !["running", "paused"].includes(job.status);
+  $("retry").hidden = (!job.failed && job.sourceStatus !== "failed") || ["running", "paused"].includes(job.status);
 }
 function summarize(job) {
   if (!job) return null;
   const count = status => job.items.filter(item => item.status === status).length;
-  return { handle: job.handle, platform: job.platform || "x", pathVersion: job.pathVersion || 1, folderCount: job.folderCount ?? null, status: job.status, total: job.items.length, done: count("complete"), failed: count("failed"), active: count("active"), queued: count("queued"), cancelled: count("cancelled"), skipped: job.skipped, sourceStatus: job.source?.status || null, sourceError: job.source?.error || "", errors: job.items.filter(item => item.status === "failed").slice(0, 3).map(item => item.error) };
+  return { handle: job.handle, platform: job.platform || "x", pathVersion: job.pathVersion || 1, folderCount: job.folderCount ?? null, status: job.status, total: job.items.length, done: count("complete"), failed: count("failed"), active: count("active") + count("preparing"), queued: count("queued"), waiting: count("waiting"), cancelled: count("cancelled"), skipped: job.skipped, sourceStatus: job.source?.status || null, sourceError: job.source?.error || "", errors: job.items.filter(item => item.status === "failed").slice(0, 3).map(item => item.error) };
 }
 async function startDownload(items) {
   if (busy.has("download")) return;
@@ -251,6 +254,11 @@ $("list").addEventListener("scroll", () => {
   scrollTimer = setTimeout(() => command("SCROLL", { scrollTop: $("list").scrollTop }), 120);
 }, { passive: true });
 $("download").addEventListener("click", () => { const selected = new Set(state.selected); void startDownload(state.items.filter(item => selected.has(item.id))); });
+$("pause").addEventListener("click", () => {
+  const button = $("pause");
+  button.disabled = true;
+  void worker({ type: currentJob?.status === "paused" ? "RESUME_DOWNLOAD" : "PAUSE_DOWNLOAD" }).then(result => { currentJob = result.job; updateProgress(); }).catch(showError).finally(() => { button.disabled = false; });
+});
 $("cancel").addEventListener("click", () => { void worker({ type: "CANCEL_DOWNLOAD" }).then(result => { currentJob = result.job; updateProgress(); }).catch(showError); });
 $("retry").addEventListener("click", () => { void worker({ type: "RETRY_DOWNLOAD" }).then(result => { currentJob = result.job; updateProgress(); }).catch(showError); });
 $("open-folder").addEventListener("click", () => { void chromeCall(() => chrome.downloads.showDefaultFolder()).catch(showError); });

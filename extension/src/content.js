@@ -1,6 +1,6 @@
 (() => {
   "use strict";
-  const CONTENT_VERSION = "1.2.2";
+  const CONTENT_VERSION = "1.3.0";
   const isFacebook = WakuFacebook.isFacebook(location.href);
   const isPixiv = location.hostname === "www.pixiv.net";
   const platform = isPixiv ? "pixiv" : isFacebook ? "facebook" : "x";

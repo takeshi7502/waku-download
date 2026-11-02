@@ -6,6 +6,7 @@ let serial = Promise.resolve();
 let scanSerial = Promise.resolve();
 let offscreenCreation = null;
 const HISTORY_LIMIT = 20000;
+const RETRY_DELAYS = [5000, 15000];
 const archiveKey = item => `${item.platform === "facebook" ? "facebook:" : item.platform === "pixiv" ? "pixiv:" : ""}${item.handle.toLowerCase()}:${item.id}`;
 const ready = chrome.storage.local.get(["job", "history"]).then(saved => {
   job = saved.job || null;
@@ -24,7 +25,21 @@ function exclusiveScan(task) {
 function summary() {
   if (!job) return null;
   const count = status => job.items.filter(item => item.status === status).length;
-  return { id: job.id, handle: job.handle, platform: job.platform || "x", pathVersion: job.pathVersion || 1, folderCount: job.folderCount ?? null, total: job.items.length, done: count("complete"), failed: count("failed"), active: count("active"), queued: count("queued"), cancelled: count("cancelled"), status: job.status, skipped: job.skipped, sourceStatus: job.source?.status || null, sourceError: job.source?.error || "", errors: job.items.filter(item => item.status === "failed").slice(0, 3).map(item => item.error) };
+  return { id: job.id, handle: job.handle, platform: job.platform || "x", pathVersion: job.pathVersion || 1, folderCount: job.folderCount ?? null, total: job.items.length, done: count("complete"), failed: count("failed"), active: count("active") + count("preparing"), queued: count("queued"), waiting: count("waiting"), cancelled: count("cancelled"), status: job.status, skipped: job.skipped, sourceStatus: job.source?.status || null, sourceError: job.source?.error || "", errors: job.items.filter(item => item.status === "failed").slice(0, 3).map(item => item.error) };
+}
+function errorDetail(error, platform) {
+  const raw = String(error || "");
+  if (/SERVER_FORBIDDEN|HTTP\s*(401|403)/i.test(raw)) return platform === "facebook" ? "Facebook từ chối truy cập hoặc link ảnh đã hết hạn. Tải lại trang và cuộn lại." : platform === "pixiv" ? "Pixiv từ chối truy cập ảnh. Kiểm tra quyền xem rồi tải lại trang." : "Máy chủ từ chối truy cập ảnh. Tải lại trang rồi thử lại.";
+  if (/SERVER_BAD_CONTENT|SERVER_NO_RANGE|HTTP\s*404/i.test(raw)) return "Không tìm thấy ảnh hoặc link ảnh không còn hiệu lực. Tải lại trang rồi thử lại.";
+  if (/NETWORK|SERVER_UNREACHABLE|FAILED TO FETCH|LOAD FAILED|TIMEOUT|TIMED OUT/i.test(raw)) return "Không kết nối được tới máy chủ. Kiểm tra mạng rồi thử lại.";
+  if (/HTTP\s*429|SERVER_TOO_MANY_REQUESTS/i.test(raw)) return "Máy chủ đang giới hạn lượt tải. Đợi một lúc rồi thử lại.";
+  if (/HTTP\s*5\d\d|SERVER_FAILED/i.test(raw)) return "Máy chủ tạm thời gặp lỗi. Hãy thử lại sau.";
+  if (/FILE_NO_SPACE/i.test(raw)) return "Ổ đĩa đã hết dung lượng. Giải phóng dung lượng rồi thử lại.";
+  if (/FILE_ACCESS_DENIED|FILE_SECURITY_CHECK_FAILED/i.test(raw)) return "Không thể ghi file. Kiểm tra quyền và thư mục tải xuống.";
+  return raw || "Tải bị gián đoạn. Hãy thử lại.";
+}
+function transient(error) {
+  return /NETWORK_(?:FAILED|DISCONNECTED|TIMEOUT|SERVER_DOWN)|FAILED TO FETCH|LOAD FAILED|TIMED OUT|HTTP\s*(?:408|429|5\d\d)|SERVER_(?:FAILED|UNREACHABLE|TOO_MANY_REQUESTS)/i.test(String(error || ""));
 }
 function photoPath(item) {
   const legacy = job.pathVersion !== 2;
@@ -45,7 +60,7 @@ function sourceText(source, platform, handle) {
 function settleSource(state, error) {
   if (!job?.source) return;
   if (state === "complete") { job.source.status = "complete"; job.source.error = ""; }
-  else if (state === "interrupted") { job.source.status = "failed"; job.source.error = error || "Tải bị gián đoạn."; }
+  else if (state === "interrupted") { job.source.status = "failed"; job.source.error = errorDetail(error, job.platform); }
 }
 async function save() {
   const keys = Object.keys(history);
@@ -60,9 +75,15 @@ function settle(item, state, error) {
   if (state === "complete") {
     item.status = "complete";
     history[archiveKey(item.photo)] = Date.now();
-  } else if (state === "interrupted") {
-    if (item.status !== "cancelled") item.status = "failed";
-    item.error = error || "Tải bị gián đoạn.";
+  } else if (state === "interrupted" && item.status !== "cancelled") {
+    const retries = item.retries || 0;
+    item.error = errorDetail(error, item.photo.platform || "x");
+    if (job?.status !== "cancelled" && transient(error) && retries < RETRY_DELAYS.length) {
+      item.retries = retries + 1;
+      item.retryAt = Date.now() + RETRY_DELAYS[retries];
+      item.status = "waiting";
+      item.downloadId = null;
+    } else item.status = "failed";
   }
 }
 async function pixivBlob(url) {
@@ -80,28 +101,52 @@ async function reconcile() {
   for (const item of job.items.filter(item => item.status === "active")) {
     try {
       const [download] = await chrome.downloads.search({ id: item.downloadId });
-      if (!download) { item.status = "failed"; item.error = "Không còn thông tin lượt tải trong trình duyệt."; }
+      if (!download) settle(item, "interrupted", "Không còn thông tin lượt tải trong trình duyệt. Hãy thử lại.");
       else settle(item, download.state, download.error);
-    } catch (error) { item.status = "failed"; item.error = error.message; }
+    } catch (error) { settle(item, "interrupted", error.message); }
   }
   if (job.source?.status === "active") {
     try {
       const [download] = await chrome.downloads.search({ id: job.source.downloadId });
       if (!download) { job.source.status = "failed"; job.source.error = "Không còn thông tin tệp nguồn."; }
       else settleSource(download.state, download.error);
-    } catch (error) { job.source.status = "failed"; job.source.error = error.message; }
+    } catch (error) { job.source.status = "failed"; job.source.error = errorDetail(error.message, job.platform); }
+  }
+}
+function revokeBlob(url) {
+  if (url) void chrome.runtime.sendMessage({ target: "pixiv-offscreen", type: "REVOKE", url }).catch(() => {});
+}
+async function beginPixiv(item, jobId) {
+  try {
+    const url = await pixivBlob(item.photo.url);
+    await exclusive(async () => {
+      if (job?.id !== jobId || item.status !== "preparing") { revokeBlob(url); return; }
+      item.blobUrl = url;
+      try {
+        item.downloadId = await chrome.downloads.download({ url, filename: photoPath(item.photo), saveAs: false, conflictAction: "uniquify" });
+        item.status = "active";
+      } catch (error) { settle(item, "interrupted", error.message); }
+      if (job.status === "running") await pump(); else await save();
+    });
+  } catch (error) {
+    await exclusive(async () => {
+      if (job?.id !== jobId || item.status !== "preparing") return;
+      settle(item, "interrupted", error.message);
+      if (job.status === "running") await pump(); else await save();
+    });
   }
 }
 async function pump() {
   if (!job || job.status !== "running") return;
-  let active = job.items.filter(item => item.status === "active").length;
+  for (const item of job.items) if (item.status === "waiting" && item.retryAt <= Date.now()) item.status = "queued";
+  let active = job.items.filter(item => item.status === "active" || item.status === "preparing").length;
+  const prepare = [];
   for (const item of job.items) {
     if (active >= 3) break;
     if (item.status !== "queued") continue;
     try {
-      if (item.photo.platform === "pixiv") item.blobUrl = await pixivBlob(item.photo.url);
-      item.downloadId = await chrome.downloads.download({ url: item.blobUrl || item.photo.url, filename: photoPath(item.photo), saveAs: false, conflictAction: "uniquify" });
-      item.status = "active";
+      if (item.photo.platform === "pixiv") { item.status = "preparing"; prepare.push(item); }
+      else { item.downloadId = await chrome.downloads.download({ url: item.photo.url, filename: photoPath(item.photo), saveAs: false, conflictAction: "uniquify" }); item.status = "active"; }
       active++;
     } catch (error) { settle(item, "interrupted", error.message); }
   }
@@ -113,16 +158,19 @@ async function pump() {
       job.source.status = "active";
       const [download] = await chrome.downloads.search({ id: job.source.downloadId });
       if (download) settleSource(download.state, download.error);
-    } catch (error) { job.source.status = "failed"; job.source.error = error.message; }
+    } catch (error) { job.source.status = "failed"; job.source.error = errorDetail(error.message, job.platform); }
   }
-  if (!job.items.some(item => item.status === "queued" || item.status === "active") && !["queued", "active"].includes(job.source?.status)) {
+  const retryAt = Math.min(...job.items.filter(item => item.status === "waiting").map(item => item.retryAt));
+  if (Number.isFinite(retryAt)) await chrome.alarms.create("waku-retry", { when: retryAt });
+  if (!job.items.some(item => ["queued", "active", "preparing", "waiting"].includes(item.status)) && !["queued", "active"].includes(job.source?.status)) {
     job.status = job.items.some(item => item.status === "failed") || job.source?.status === "failed" ? "finished_with_errors" : "complete";
   }
   // Fill free slots first, then checkpoint all started IDs in one storage write.
   await save();
+  for (const item of prepare) void beginPixiv(item, job.id);
 }
 async function start(message) {
-  if (job?.status === "running") throw new Error("Đang có một lượt tải. Dừng hoặc đợi tải xong trước.");
+  if (["running", "paused"].includes(job?.status)) throw new Error("Đang có một lượt tải. Dừng hoặc đợi tải xong trước.");
   const platform = message.platform === "pixiv" ? "pixiv" : message.platform === "facebook" ? "facebook" : "x";
   const handle = platform === "pixiv" ? WakuPixiv.handle(message.handle) : platform === "facebook" ? WakuFacebook.handle(message.handle) : WakuX.profile(message.handle);
   if (!handle || !Array.isArray(message.items)) throw new Error("Danh sách ảnh không hợp lệ.");
@@ -187,14 +235,16 @@ chrome.runtime.onMessage.addListener((message, sender, reply) => {
     return true;
   }
   if (!sender.url?.startsWith(chrome.runtime.getURL(""))) return;
-  if (!["JOB", "DOWNLOAD", "CANCEL_DOWNLOAD", "RETRY_DOWNLOAD"].includes(message.type)) return;
+  if (!["JOB", "DOWNLOAD", "PAUSE_DOWNLOAD", "RESUME_DOWNLOAD", "CANCEL_DOWNLOAD", "RETRY_DOWNLOAD"].includes(message.type)) return;
   exclusive(async () => {
     if (message.type === "JOB") return summary();
     if (message.type === "DOWNLOAD") return start(message);
-    if (message.type === "CANCEL_DOWNLOAD" && job?.status === "running") {
+    if (message.type === "PAUSE_DOWNLOAD" && job?.status === "running") { job.status = "paused"; await save(); }
+    if (message.type === "RESUME_DOWNLOAD" && job?.status === "paused") job.status = "running";
+    if (message.type === "CANCEL_DOWNLOAD" && ["running", "paused"].includes(job?.status)) {
       job.status = "cancelled";
       for (const item of job.items) {
-        if (item.status === "queued") item.status = "cancelled";
+        if (["queued", "waiting", "preparing"].includes(item.status)) item.status = "cancelled";
         if (item.status === "active") {
           // Reconcile first: a completed file must still enter the saved history.
           const [download] = await chrome.downloads.search({ id: item.downloadId });
@@ -205,7 +255,7 @@ chrome.runtime.onMessage.addListener((message, sender, reply) => {
       await save();
     }
     if (message.type === "RETRY_DOWNLOAD" && job && job.status !== "running") {
-      for (const item of job.items) if (item.status === "failed") { item.status = "queued"; item.error = ""; item.downloadId = null; }
+      for (const item of job.items) if (item.status === "failed") { item.status = "queued"; item.error = ""; item.downloadId = null; item.retries = 0; }
       if (job.source?.status === "failed") { job.source.status = "queued"; job.source.error = ""; job.source.downloadId = null; }
       job.status = "running";
     }
@@ -225,20 +275,22 @@ chrome.downloads.onChanged.addListener(delta => {
     }
     const item = job?.items.find(item => item.downloadId === delta.id);
     if (!item) return;
-    settle(item, delta.state.current, delta.error?.current);
+    let error = delta.error?.current;
+    if (delta.state.current === "interrupted" && !error) error = (await chrome.downloads.search({ id: delta.id }).catch(() => []))[0]?.error;
+    settle(item, delta.state.current, error);
     if (job.status === "running") await pump();
     else await save();
   });
 });
 chrome.alarms.onAlarm.addListener(alarm => {
-  if (alarm.name !== "waku-queue") return;
-  void exclusive(async () => { await reconcile(); await pump(); });
+  if (!["waku-queue", "waku-retry"].includes(alarm.name)) return;
+  void exclusive(async () => { await reconcile(); if (job?.status === "paused") await save(); else await pump(); });
 });
 // Alarms and download events wake the worker independently of panel visibility.
 // Remove the pre-rename alarm so upgrading does not leave an extra recurring wakeup.
 void chrome.alarms.clear("xdl-queue");
 void chrome.alarms.create("waku-queue", { periodInMinutes: 1 });
-void exclusive(async () => { await reconcile(); await pump(); });
+void exclusive(async () => { if (job) for (const item of job.items) if (item.status === "preparing") item.status = "queued"; await reconcile(); await pump(); if (job?.status === "paused") await save(); });
 
 chrome.action?.onClicked.addListener(tab => {
   void (async () => {

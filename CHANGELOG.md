@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.3.0
+
+- Tạm dừng và tiếp tục hàng đợi; các ảnh đã bắt đầu vẫn tải xong.
+- Tự thử lại tối đa hai lần khi gặp lỗi mạng hoặc máy chủ tạm thời; hiển thị hướng dẫn theo loại lỗi.
+- Giữ nút điều khiển phản hồi khi Pixiv đang chuẩn bị ảnh gốc, sửa thông báo lỗi Pixiv bị sai ký tự.
+
 ## 1.2.2
 
 - Mở X, Facebook và Pixiv với nút logo thu gọn; bấm nút để mở bảng.
