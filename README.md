@@ -2,6 +2,12 @@
 
 Tiện ích Chrome và Microsoft Edge giúp gom và tải hàng loạt ảnh trên profile **X**, **Facebook** và **Pixiv**. Cuộn trang để nhận thêm ảnh, chọn ảnh cần lưu rồi theo dõi tiến trình trong bảng bên phải.
 
+## Giấy phép và credit
+
+Waku Download là phần mềm mã nguồn mở miễn phí, phát hành theo [MIT License](LICENSE). Bạn có thể sử dụng, sửa đổi và phân phối mã nguồn, kể cả cho mục đích thương mại, với điều kiện giữ thông báo bản quyền và giấy phép MIT.
+
+**Tác giả:** [takeshi7502](https://github.com/takeshi7502). Xem [CREDITS.md](CREDITS.md) để biết nguồn cảm hứng giao diện và các công cụ được sử dụng. Giấy phép của tiện ích không áp dụng cho ảnh hoặc nội dung của tác giả khác.
+
 ## Cài đặt
 
 1. Tải gói ZIP của bản phát hành từ [GitHub Releases](https://github.com/takeshi7502/waku-download/releases/latest) và giải nén.

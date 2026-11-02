@@ -6,7 +6,9 @@
   "engines": {
     "node": ">=22"
   },
-  "description": "Chrome and Edge extension for downloading loaded profile photos from X and Facebook",
+  "description": "Chrome and Edge extension for downloading loaded profile photos from X, Facebook and Pixiv",
+  "author": "takeshi7502 (https://github.com/takeshi7502)",
+  "license": "MIT",
   "scripts": {
     "test": "node --test tests/core.test.js tests/facebook.test.js tests/queue.test.js tests/content-lifecycle.test.js tests/pixiv.test.js",
     "test:browser": "node --test tests/browser.test.js tests/facebook-browser.test.js tests/source-browser.test.js tests/version-reset-browser.test.js tests/pixiv-browser.test.js",
